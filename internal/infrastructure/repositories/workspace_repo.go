@@ -1,8 +1,10 @@
 package repositories
 
 import (
-	"backend/internal/domain"
 	"context"
+
+	"api.request.app.backend/internal/domain"
+	"github.com/google/uuid"
 
 	"gorm.io/gorm"
 )
@@ -20,7 +22,7 @@ func (r *workspaceRepo) Create(ctx context.Context, workspace *domain.Workspace)
 	return r.db.WithContext(ctx).Create(workspace).Error
 }
 
-func (r *workspaceRepo) GetByID(ctx context.Context, id uint) (*domain.Workspace, error) {
+func (r *workspaceRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Workspace, error) {
 	var workspace domain.Workspace
 	err := r.db.WithContext(ctx).First(&workspace, id).Error
 	if err != nil {

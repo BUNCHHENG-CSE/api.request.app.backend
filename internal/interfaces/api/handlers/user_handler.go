@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
-	"backend/internal/application"
+	"api.request.app.backend/internal/application"
+	"api.request.app.backend/internal/interfaces/api/response"
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,36 +26,32 @@ func (h *UserHandler) RegisterUser(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	user, err := h.service.CreateUser(c.Request.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
 		// In a production app, map domain errors to specific HTTP status codes (e.g., 409 Conflict for duplicate email)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "User created successfully",
-		"data":    user,
-	})
+	response.Success(c, http.StatusCreated, "User created successfully!!!", user)
 }
 
 func (h *UserHandler) GetUser(c *gin.Context) {
-	idParam := c.Param("id")
-	id, err := strconv.ParseUint(idParam, 10, 32)
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		response.Error(c, http.StatusBadRequest, "Invalid user ID")
 		return
 	}
 
-	user, err := h.service.GetUserByID(c.Request.Context(), uint(id))
+	user, err := h.service.GetUserByID(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		response.Error(c, http.StatusInternalServerError, "User not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, user)
+	response.Success(c, http.StatusOK, "Get user successfully!!!", user)
 }

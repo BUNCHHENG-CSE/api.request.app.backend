@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 
-	"backend/internal/domain"
+	"api.request.app.backend/internal/domain"
+	"github.com/google/uuid"
 )
 
 type RequestService interface {
-	CreateRequest(ctx context.Context, flowID uint, method, url, headers, body string) (*domain.Request, error)
-	GetRequestsByFlow(ctx context.Context, flowID uint) ([]domain.Request, error)
+	CreateRequest(ctx context.Context, flowID uuid.UUID, method, url, headers, body string) (*domain.Request, error)
+	GetRequestsByFlow(ctx context.Context, flowID uuid.UUID) ([]domain.Request, error)
 }
 
 type requestService struct {
@@ -20,7 +21,7 @@ func NewRequestService(repo domain.RequestRepository) RequestService {
 	return &requestService{repo: repo}
 }
 
-func (s *requestService) CreateRequest(ctx context.Context, flowID uint, method, url, headers, body string) (*domain.Request, error) {
+func (s *requestService) CreateRequest(ctx context.Context, flowID uuid.UUID, method, url, headers, body string) (*domain.Request, error) {
 	if method == "" || url == "" {
 		return nil, errors.New("method and url are required")
 	}
@@ -40,6 +41,6 @@ func (s *requestService) CreateRequest(ctx context.Context, flowID uint, method,
 	return req, nil
 }
 
-func (s *requestService) GetRequestsByFlow(ctx context.Context, flowID uint) ([]domain.Request, error) {
+func (s *requestService) GetRequestsByFlow(ctx context.Context, flowID uuid.UUID) ([]domain.Request, error) {
 	return s.repo.ListByFlow(ctx, flowID)
 }

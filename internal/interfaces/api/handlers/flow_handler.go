@@ -1,9 +1,10 @@
 package handlers
 
 import (
-	"backend/internal/application"
 	"net/http"
 
+	"api.request.app.backend/internal/application"
+	"api.request.app.backend/internal/interfaces/api/response"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,25 +17,21 @@ func NewFlowHandler(service application.FlowService) *FlowHandler {
 }
 func (h *FlowHandler) Create(c *gin.Context) {
 	// Optimized: A Flow is usually created inside a Workspace, requiring a Name.
-	var req struct {
-		WorkspaceID uint   `json:"workspace_id" binding:"required"`
-		Name        string `json:"name" binding:"required"`
-		Description string `json:"description"`
-	}
+	var req CreateFlowRequest
 
 	// 1. Bind and validate the JSON payload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// 2. Pass to the Application Service layer
 	flow, err := h.service.CreateFlow(c.Request.Context(), req.WorkspaceID, req.Name, req.Description)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// 3. Return standardized response
-	c.JSON(http.StatusCreated, flow)
+	response.Success(c, http.StatusCreated, "Flow created successfully !!!", flow)
 }

@@ -1,8 +1,11 @@
 package handlers
 
 import (
-	"backend/internal/application"
 	"net/http"
+
+	"api.request.app.backend/internal/application"
+	"api.request.app.backend/internal/interfaces/api/response"
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,21 +20,21 @@ func NewEnvironmentHandler(service application.EnvironmentService) *EnvironmentH
 
 func (h *EnvironmentHandler) Create(c *gin.Context) {
 	var req struct {
-		WorkspaceID uint   `json:"workspace_id" binding:"required"`
-		Name        string `json:"name" binding:"required"`
-		Variables   string `json:"variables" binding:"required"` // Assuming JSON string payload
+		WorkspaceID uuid.UUID `json:"workspace_id" binding:"required"`
+		Name        string    `json:"name" binding:"required"`
+		Variables   string    `json:"variables" binding:"required"` // Assuming JSON string payload
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	env, err := h.service.CreateEnvironment(c.Request.Context(), req.WorkspaceID, req.Name, req.Variables)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, env)
+	response.Success(c, http.StatusCreated, "Environment created successfully !!!", env)
 }

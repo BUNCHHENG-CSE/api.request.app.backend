@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 
-	"backend/internal/domain"
+	"api.request.app.backend/internal/domain"
+	"github.com/google/uuid"
 )
 
 type EnvironmentService interface {
-	CreateEnvironment(ctx context.Context, workspaceID uint, name, variables string) (*domain.Environment, error)
-	GetEnvironmentsByWorkspace(ctx context.Context, workspaceID uint) ([]domain.Environment, error)
+	CreateEnvironment(ctx context.Context, workspaceID uuid.UUID, name, variables string) (*domain.Environment, error)
+	GetEnvironmentsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Environment, error)
 }
 
 type environmentService struct {
@@ -20,7 +21,7 @@ func NewEnvironmentService(repo domain.EnvironmentRepository) EnvironmentService
 	return &environmentService{repo: repo}
 }
 
-func (s *environmentService) CreateEnvironment(ctx context.Context, workspaceID uint, name, variables string) (*domain.Environment, error) {
+func (s *environmentService) CreateEnvironment(ctx context.Context, workspaceID uuid.UUID, name, variables string) (*domain.Environment, error) {
 	if name == "" {
 		return nil, errors.New("environment name is required")
 	}
@@ -38,6 +39,6 @@ func (s *environmentService) CreateEnvironment(ctx context.Context, workspaceID 
 	return env, nil
 }
 
-func (s *environmentService) GetEnvironmentsByWorkspace(ctx context.Context, workspaceID uint) ([]domain.Environment, error) {
+func (s *environmentService) GetEnvironmentsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Environment, error) {
 	return s.repo.ListByWorkspace(ctx, workspaceID)
 }

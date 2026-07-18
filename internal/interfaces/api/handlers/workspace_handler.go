@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
-	"backend/internal/application"
+	"api.request.app.backend/internal/application"
+	"api.request.app.backend/internal/interfaces/api/response"
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,37 +20,37 @@ func NewWorkspaceHandler(service application.WorkspaceService) *WorkspaceHandler
 
 func (h *WorkspaceHandler) Create(c *gin.Context) {
 	var req struct {
-		Name    string `json:"name" binding:"required"`
-		OwnerID uint   `json:"owner_id" binding:"required"`
+		Name    string    `json:"name" binding:"required"`
+		OwnerID uuid.UUID `json:"owner_id" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	workspace, err := h.service.CreateWorkspace(c.Request.Context(), req.Name, req.OwnerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, workspace)
+	response.Success(c, http.StatusCreated, "Workspace created successfully!!!", workspace)
 }
 
 func (h *WorkspaceHandler) Get(c *gin.Context) {
-	idParam := c.Param("id")
-	id, err := strconv.ParseUint(idParam, 10, 32)
+
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		response.Error(c, http.StatusBadRequest, "invalid id")
 		return
 	}
 
-	workspace, err := h.service.GetWorkspace(c.Request.Context(), uint(id))
+	workspace, err := h.service.GetWorkspace(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		response.Error(c, http.StatusInternalServerError, "workspace not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, workspace)
+	response.Success(c, http.StatusOK, "Get workspace successfully!!!", workspace)
 }

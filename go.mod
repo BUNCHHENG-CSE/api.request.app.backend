@@ -1,4 +1,4 @@
-module backend
+module api.request.app.backend
 
 go 1.26
 

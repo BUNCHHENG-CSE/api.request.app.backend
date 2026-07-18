@@ -1,14 +1,16 @@
 package application
 
 import (
-	"backend/internal/domain"
 	"context"
 	"errors"
+
+	"api.request.app.backend/internal/domain"
+	"github.com/google/uuid"
 )
 
 type FlowService interface {
-	CreateFlow(ctx context.Context, workspaceID uint, name, description string) (*domain.Flow, error)
-	GetFlowsByWorkspace(ctx context.Context, workspaceID uint) ([]domain.Flow, error)
+	CreateFlow(ctx context.Context, workspaceID uuid.UUID, name, description string) (*domain.Flow, error)
+	GetFlowsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Flow, error)
 }
 
 type flowService struct {
@@ -19,7 +21,7 @@ func NewFlowService(repo domain.FlowRepository) FlowService {
 	return &flowService{repo: repo}
 }
 
-func (s *flowService) CreateFlow(ctx context.Context, workspaceID uint, name, description string) (*domain.Flow, error) {
+func (s *flowService) CreateFlow(ctx context.Context, workspaceID uuid.UUID, name, description string) (*domain.Flow, error) {
 	if name == "" {
 		return nil, errors.New("flow name is required")
 	}
@@ -37,6 +39,6 @@ func (s *flowService) CreateFlow(ctx context.Context, workspaceID uint, name, de
 	return flow, nil
 }
 
-func (s *flowService) GetFlowsByWorkspace(ctx context.Context, workspaceID uint) ([]domain.Flow, error) {
+func (s *flowService) GetFlowsByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Flow, error) {
 	return s.repo.ListByWorkspace(ctx, workspaceID)
 }

@@ -1,14 +1,16 @@
 package application
 
 import (
-	"backend/internal/domain"
 	"context"
 	"errors"
+
+	"api.request.app.backend/internal/domain"
+	"github.com/google/uuid"
 )
 
 type WorkspaceService interface {
-	CreateWorkspace(ctx context.Context, name string, ownerID uint) (*domain.Workspace, error)
-	GetWorkspace(ctx context.Context, id uint) (*domain.Workspace, error)
+	CreateWorkspace(ctx context.Context, name string, ownerID uuid.UUID) (*domain.Workspace, error)
+	GetWorkspace(ctx context.Context, id uuid.UUID) (*domain.Workspace, error)
 }
 
 type workspaceService struct {
@@ -20,7 +22,7 @@ func NewWorkspaceService(repo domain.WorkspaceRepository) WorkspaceService {
 	return &workspaceService{repo: repo}
 }
 
-func (s *workspaceService) CreateWorkspace(ctx context.Context, name string, ownerID uint) (*domain.Workspace, error) {
+func (s *workspaceService) CreateWorkspace(ctx context.Context, name string, ownerID uuid.UUID) (*domain.Workspace, error) {
 	if name == "" {
 		return nil, errors.New("workspace name is required")
 	}
@@ -36,6 +38,6 @@ func (s *workspaceService) CreateWorkspace(ctx context.Context, name string, own
 	return ws, nil
 }
 
-func (s *workspaceService) GetWorkspace(ctx context.Context, id uint) (*domain.Workspace, error) {
+func (s *workspaceService) GetWorkspace(ctx context.Context, id uuid.UUID) (*domain.Workspace, error) {
 	return s.repo.GetByID(ctx, id)
 }

@@ -1,8 +1,10 @@
 package repositories
 
 import (
-	"backend/internal/domain"
 	"context"
+
+	"api.request.app.backend/internal/domain"
+	"github.com/google/uuid"
 
 	"gorm.io/gorm"
 )
@@ -19,13 +21,13 @@ func (r *environmentRepo) Create(ctx context.Context, req *domain.Environment) e
 	return r.db.WithContext(ctx).Create(req).Error
 }
 
-func (r *environmentRepo) GetByID(ctx context.Context, id uint) (*domain.Environment, error) {
+func (r *environmentRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Environment, error) {
 	var environment domain.Environment
 	err := r.db.WithContext(ctx).First(&environment, id).Error
 	return &environment, err
 }
 
-func (r *environmentRepo) ListByWorkspace(ctx context.Context, flowID uint) ([]domain.Environment, error) {
+func (r *environmentRepo) ListByWorkspace(ctx context.Context, flowID uuid.UUID) ([]domain.Environment, error) {
 	var environments []domain.Environment
 	err := r.db.WithContext(ctx).Where("flow_id = ?", flowID).Find(&environments).Error
 	return environments, err
@@ -35,6 +37,6 @@ func (r *environmentRepo) Update(ctx context.Context, req *domain.Environment) e
 	return r.db.WithContext(ctx).Save(req).Error
 }
 
-func (r *environmentRepo) Delete(ctx context.Context, id uint) error {
+func (r *environmentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return r.db.WithContext(ctx).Delete(&domain.Environment{}, id).Error
 }

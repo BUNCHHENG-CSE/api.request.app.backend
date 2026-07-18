@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 
-	"backend/internal/domain"
+	"api.request.app.backend/internal/domain"
+	"github.com/google/uuid"
 	// import "golang.org/x/crypto/bcrypt" // Uncomment to use bcrypt for password hashing
 )
 
 type UserService interface {
 	CreateUser(ctx context.Context, username, email, password string) (*domain.User, error)
-	GetUserByID(ctx context.Context, id uint) (*domain.User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 }
 
 type userService struct {
@@ -49,6 +50,6 @@ func (s *userService) CreateUser(ctx context.Context, username, email, password 
 	return user, nil
 }
 
-func (s *userService) GetUserByID(ctx context.Context, id uint) (*domain.User, error) {
+func (s *userService) GetUserByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	return s.repo.GetByID(ctx, id)
 }

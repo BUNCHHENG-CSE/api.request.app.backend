@@ -3,25 +3,42 @@ package main
 import (
 	"log"
 
-	"backend/internal/application"
-	"backend/internal/infrastructure/repositories"
-	"backend/internal/interfaces/api/handlers"
-	"backend/internal/interfaces/api/routes"
+	"api.request.app.backend/internal/domain"
+	"api.request.app.backend/internal/infrastructure/config"
+
+	"api.request.app.backend/internal/application"
+	"api.request.app.backend/internal/infrastructure/repositories"
+	"api.request.app.backend/internal/interfaces/api/handlers"
+	"api.request.app.backend/internal/interfaces/api/routes"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func main() {
-	// 1. Initialize Infrastructure (Database)
-	// In production, load this from environment variables
-	dsn := "host=localhost user=postgres password=secret dbname=mydb port=5432 sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	// 2. Load Configuration from .env
+	cfg := config.LoadConfig()
+
+	// Initialize Database using the configured URL
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	// 2. Initialize Repositories (Infrastructure Layer)
+	// 3. Run Database Migrations
+	log.Println("Running database migrations...")
+	err = db.AutoMigrate(
+		&domain.User{},
+		&domain.Workspace{},
+		&domain.Flow{},
+		&domain.Request{},
+		&domain.Environment{},
+		&domain.Collection{},
+	)
+	if err != nil {
+		log.Fatal("Failed to migrate database schemas:", err)
+	}
+
 	userRepo := repositories.NewUserRepository(db)
 	workspaceRepo := repositories.NewWorkspaceRepository(db)
 	flowRepo := repositories.NewFlowRepository(db)

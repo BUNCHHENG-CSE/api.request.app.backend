@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"backend/internal/application"
-
+	"api.request.app.backend/internal/application"
+	"api.request.app.backend/internal/interfaces/api/response"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,22 +17,18 @@ func NewCollectionHandler(service application.CollectionService) *CollectionHand
 }
 
 func (h *CollectionHandler) Create(c *gin.Context) {
-	var req struct {
-		WorkspaceID uint   `json:"workspace_id" binding:"required"`
-		Name        string `json:"name" binding:"required"`
-		Description string `json:"description"`
-	}
+	var req CreateCollectionRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	collection, err := h.service.CreateCollection(c.Request.Context(), req.WorkspaceID, req.Name, req.Description)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, collection)
+	response.Success(c, http.StatusCreated, "Collection created successfully !!!", collection)
 }
