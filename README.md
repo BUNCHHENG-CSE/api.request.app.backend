@@ -5,25 +5,57 @@ A comprehensive REST API backend for FlowAPI, built with Go.
 ## Project Structure
 
 ```
-backend/
+api.request.app.backend/
 ├── cmd/
 │   └── api/
-│       └── main.go                 # Entry point
+│       └── main.go                 
 ├── internal/
-│   ├── models/                     # Data models
-│   ├── entities/                   # Database entities
-│   ├── services/                   # Business logic
-│   ├── controllers/                # HTTP handlers
-│   ├── repositories/               # Data access layer
-│   ├── middleware/                 # HTTP middleware
-│   ├── config/                     # Configuration
-│   └── utils/                      # Utilities
-├── migrations/                     # Database migrations
-├── pkg/
-│   └── errors/                     # Custom errors
+│   ├── domain/                     
+│   │   ├── collection.go
+│   │   ├── environment.go
+│   │   ├── flow.go
+│   │   ├── request.go
+│   │   ├── user.go
+│   │   └── workspace.go
+│   ├── application/                
+│   │   ├── collection_service.go
+│   │   ├── environment_service.go
+│   │   ├── flow_service.go
+│   │   ├── request_service.go
+│   │   ├── user_service.go
+│   │   └── workspace_service.go
+│   ├── infrastructure/            
+│   │   ├── database/
+│   │   │   └── postgres.go         
+│   │   ├── repositories/           
+│   │   │   ├── collection_repo.go
+│   │   │   ├── environment_repo.go
+│   │   │   ├── flow_repo.go
+│   │   │   ├── request_repo.go
+│   │   │   ├── user_repo.go
+│   │   │   └── workspace_repo.go
+│   │   └── config/
+│   │       └── config.go
+│   └── interfaces/                 
+│       ├── api/
+│       │   ├── handlers/
+│       │   │   ├── collection_handler.go
+│       │   │   ├── environment_handler.go
+│       │   │   ├── flow_handler.go
+│       │   │   ├── request_handler.go
+│       │   │   ├── requests.go
+│       │   │   ├── user_handler.go
+│       │   │   └── workspace_handler.go
+│       │   ├── routes/
+│       │   │   └── routes.go       
+│       │   ├── middleware/
+│       │   │   └── auth.go
+│       │   └── response/
+│       │       └── response.go
+├── .env
+├── docker-compose.yml
 ├── go.mod
-├── go.sum
-└── docker-compose.yml
+└── go.sum
 ```
 
 ## Key Features

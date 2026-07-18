@@ -5,14 +5,12 @@ import (
 
 	"api.request.app.backend/internal/domain"
 	"api.request.app.backend/internal/infrastructure/config"
+	"api.request.app.backend/internal/infrastructure/database"
 
 	"api.request.app.backend/internal/application"
 	"api.request.app.backend/internal/infrastructure/repositories"
 	"api.request.app.backend/internal/interfaces/api/handlers"
 	"api.request.app.backend/internal/interfaces/api/routes"
-
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 func main() {
@@ -20,9 +18,9 @@ func main() {
 	cfg := config.LoadConfig()
 
 	// Initialize Database using the configured URL
-	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
+	db, err := database.NewPostgresDB(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		log.Fatal("Failed to initialize database:", err)
 	}
 
 	// 3. Run Database Migrations
