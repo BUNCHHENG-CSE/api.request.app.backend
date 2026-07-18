@@ -1,49 +1,44 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: flowapi_postgres
+  api:
+    build: .
+    container_name: go_api_server
+    ports:
+      - "8080:8080"
     environment:
-      POSTGRES_USER: flowapi
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: flowapi
+      - GIN_MODE=release
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      POSTGRES_DB: ${DB_NAME:-request_app}
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
-      - flowapi
-
-  redis:
-    image: redis:7-alpine
-    container_name: flowapi_redis
-    ports:
-      - "6379:6379"
-    networks:
-      - flowapi
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: flowapi_api
-    environment:
-      DATABASE_URL: host=postgres user=flowapi password=password dbname=flowapi port=5432 sslmode=disable
-      REDIS_URL: redis:6379
-      PORT: 8080
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
-      - redis
-    networks:
-      - flowapi
-    command: /app/api
+      - app-network
 
 volumes:
-  postgres_data:
+  pgdata:
 
 networks:
-  flowapi:
+  app-network:
     driver: bridge

@@ -2,76 +2,58 @@ package main
 
 import (
 	"log"
-	"os"
 
-	"backend/internal/middleware"
-	// import repositories here once implemented
-	// "backend/internal/repositories"
+	"backend/internal/application"
+	"backend/internal/infrastructure/repositories"
+	"backend/internal/interfaces/api/handlers"
+	"backend/internal/interfaces/api/routes"
 
-	"github.com/gin-gonic/gin"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func main() {
-	// Load environment variables
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "host=localhost user=flowapi password=password dbname=flowapi port=5432 sslmode=disable"
-	}
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	// Initialize database
-	_, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	// 1. Initialize Infrastructure (Database)
+	// In production, load this from environment variables
+	dsn := "host=localhost user=postgres password=secret dbname=mydb port=5432 sslmode=disable"
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatal("Failed to connect to database:", err)
 	}
 
-	// TODO: Run migrations
-	// db.AutoMigrate(&entities.User{}, &entities.Workspace{}, &entities.Collection{}, ...)
+	// 2. Initialize Repositories (Infrastructure Layer)
+	userRepo := repositories.NewUserRepository(db)
+	workspaceRepo := repositories.NewWorkspaceRepository(db)
+	flowRepo := repositories.NewFlowRepository(db)
+	requestRepo := repositories.NewRequestRepository(db)
+	envRepo := repositories.NewEnvironmentRepository(db)
 
-	// TODO: Initialize repositories
-	// requestRepo := repositories.NewRequestRepository(db)
-	// workspaceRepo := repositories.NewWorkspaceRepository(db)
-	// environmentRepo := repositories.NewEnvironmentRepository(db)
-	// etc.
+	// 3. Initialize Services (Application Layer)
+	userService := application.NewUserService(userRepo)
+	workspaceService := application.NewWorkspaceService(workspaceRepo)
+	flowService := application.NewFlowService(flowRepo)
+	requestService := application.NewRequestService(requestRepo)
+	envService := application.NewEnvironmentService(envRepo)
 
-	// TODO: Initialize services
-	// requestService := services.NewRequestService(requestRepo, environmentRepo, responseRepo, historyRepo)
-	// workspaceService := services.NewWorkspaceService(workspaceRepo, userRepo)
-	// environmentService := services.NewEnvironmentService(environmentRepo)
-	// flowService := services.NewFlowService(flowRepo, requestService)
-	// etc.
+	// 4. Initialize Handlers (Interfaces Layer)
+	userHandler := handlers.NewUserHandler(userService)
+	workspaceHandler := handlers.NewWorkspaceHandler(workspaceService)
+	flowHandler := handlers.NewFlowHandler(flowService)
+	requestHandler := handlers.NewRequestHandler(requestService)
+	envHandler := handlers.NewEnvironmentHandler(envService)
 
-	// TODO: Initialize controllers
-	// requestController := controllers.NewRequestController(requestService)
-	// workspaceController := controllers.NewWorkspaceController(workspaceService)
-	// environmentController := controllers.NewEnvironmentController(environmentService)
-	// flowController := controllers.NewFlowController(flowService)
+	// 5. Setup Router and Inject Handlers
+	router := routes.SetupRouter(
+		userHandler,
+		workspaceHandler,
+		flowHandler,
+		requestHandler,
+		envHandler,
+	)
 
-	// Setup Gin router
-	r := gin.Default()
-
-	// Apply middleware
-	r.Use(middleware.CORSMiddleware())
-	r.Use(middleware.ErrorHandlingMiddleware())
-
-	// TODO: Register routes
-	// routeConfig := &routes.RouteConfig{
-	// 	RequestController:    requestController,
-	// 	WorkspaceController:  workspaceController,
-	// 	EnvironmentController: environmentController,
-	// 	FlowController:       flowController,
-	// }
-	// routes.RegisterRoutes(r, routeConfig)
-
-	// Start server
-	log.Printf("Starting FlowAPI server on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// 6. Start the Server
+	log.Println("Starting server on :8080...")
+	if err := router.Run(":8080"); err != nil {
+		log.Fatal("Failed to start server:", err)
 	}
 }

@@ -4,6 +4,8 @@
 *.dll
 *.so
 *.dylib
+/api-server
+bin/
 
 # Test binary, built with `go test -c`
 *.test
@@ -14,8 +16,18 @@
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Environment Variables
+.env
+.env.*
 
+# Go workspace file
+go.work
 
-.idea
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp

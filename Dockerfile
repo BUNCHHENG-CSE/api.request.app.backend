@@ -1,35 +1,32 @@
-FROM golang:1.21-alpine AS builder
+# Stage 1: Build the Go binary
+FROM golang:1.26-alpine AS builder
 
+# Set the working directory
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache git gcc musl-dev
-
-# Copy go mod files
+# Copy dependency files and download them
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy source code
+# Copy the rest of the source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o api ./cmd/api
+# Build the application (disabling CGO for static compilation)
+RUN CGO_ENABLED=0 GOOS=linux go build -o /api-server ./cmd/api/main.go
 
-# Final stage
+# Stage 2: Create a minimal production image
 FROM alpine:latest
 
-WORKDIR /app
+WORKDIR /root/
 
-# Install runtime dependencies
-RUN apk --no-cache add ca-certificates
+# Copy the binary from the builder stage
+COPY --from=builder /api-server .
 
-# Copy binary from builder
-COPY --from=builder /app/api .
+# Ensure the app can read the .env file if it exists locally
+COPY .env . 
 
-# Expose port
+# Expose the application port
 EXPOSE 8080
 
-# Run the application
-CMD ["./api"]
+# Run the binary
+CMD ["./api-server"]
