@@ -10,9 +10,11 @@ import (
 // Flow represents a collection of requests or logical steps.
 type Flow struct {
 	ID          uuid.UUID `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	WorkspaceID uuid.UUID `json:"workspace_id" gorm:"type:uuid"`
+	WorkspaceID uuid.UUID `json:"workspace_id" gorm:"type:uuid;not null;index"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	Nodes       string    `json:"nodes"`
+	Edges       string    `json:"edges"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

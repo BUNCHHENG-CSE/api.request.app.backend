@@ -19,6 +19,10 @@ profile.cov
 # Environment Variables
 .env
 .env.*
+!.env.example
+
+# Local Bruno-style collection storage (may contain secrets)
+/data/collections/
 
 # Go workspace file
 go.work

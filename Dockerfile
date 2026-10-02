@@ -22,9 +22,6 @@ WORKDIR /root/
 # Copy the binary from the builder stage
 COPY --from=builder /api-server .
 
-# Ensure the app can read the .env file if it exists locally
-COPY .env . 
-
 # Expose the application port
 EXPOSE 8080
 

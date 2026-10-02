@@ -9,14 +9,22 @@ import (
 
 // Request represents an individual API request configuration.
 type Request struct {
-	ID        uuid.UUID `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	FlowID    uuid.UUID `json:"flow_id" gorm:"type:uuid"`
-	Method    string    `json:"method"`
-	URL       string    `json:"url"`
-	Headers   string    `json:"headers"` // Can be mapped to a JSON/JSONB struct depending on DB needs
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           uuid.UUID  `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	FlowID       uuid.UUID  `json:"flow_id" gorm:"type:uuid;not null;index"`
+	CollectionID *uuid.UUID `json:"collection_id,omitempty" gorm:"type:uuid;index"`
+	Name         string     `json:"name"`
+	Position     int        `json:"position" gorm:"not null;default:0;index"`
+	Method       string     `json:"method"`
+	URL          string     `json:"url"`
+	Headers      string     `json:"headers"`
+	QueryParams  string     `json:"query_params"`
+	Body         string     `json:"body"`
+	BodyType     string     `json:"body_type"`
+	Auth         string     `json:"auth"`
+	Scripts      string     `json:"scripts"`
+	Settings     string     `json:"settings"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // RequestRepository defines the contract for Request data persistence.

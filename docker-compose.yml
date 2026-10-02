@@ -8,21 +8,24 @@ services:
       - "8080:8080"
     environment:
       - GIN_MODE=release
+      - LOCAL_COLLECTIONS_ROOT=/data/collections
     env_file:
       - .env
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./data/collections:/data/collections
     networks:
       - app-network
 
   db:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: postgres_db
     restart: always
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-Arzur12345}
       POSTGRES_DB: ${DB_NAME:-request_app}
     ports:
       - "5432:5432"

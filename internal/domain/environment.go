@@ -10,7 +10,7 @@ import (
 // Environment represents configuration variables for a workspace.
 type Environment struct {
 	ID          uuid.UUID `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	WorkspaceID uuid.UUID `json:"workspace_id" gorm:"type:uuid"`
+	WorkspaceID uuid.UUID `json:"workspace_id" gorm:"type:uuid;not null;index"`
 	Name        string    `json:"name"`
 	Variables   string    `json:"variables"` // Stored as a JSON string or JSONB in Postgres
 	CreatedAt   time.Time `json:"created_at"`

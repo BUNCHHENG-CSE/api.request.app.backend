@@ -33,6 +33,15 @@ func (r *collectionRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.U
 	return collections, err
 }
 
+func (r *collectionRepo) Update(ctx context.Context, collection *domain.Collection) error {
+	return r.db.WithContext(ctx).Save(collection).Error
+}
+
 func (r *collectionRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	return r.db.WithContext(ctx).Delete(&domain.Collection{}, id).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&domain.Request{}).Where("collection_id = ?", id).Update("collection_id", nil).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&domain.Collection{}, id).Error
+	})
 }

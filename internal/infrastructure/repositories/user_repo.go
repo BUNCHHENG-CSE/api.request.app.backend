@@ -40,3 +40,7 @@ func (r *userRepo) GetByEmail(ctx context.Context, email string) (*domain.User, 
 	}
 	return &user, nil
 }
+
+func (r *userRepo) Update(ctx context.Context, user *domain.User) error {
+	return r.db.WithContext(ctx).Save(user).Error
+}

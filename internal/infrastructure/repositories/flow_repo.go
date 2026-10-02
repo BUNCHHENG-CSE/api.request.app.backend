@@ -27,9 +27,9 @@ func (r *flowRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Flow, err
 	return &flow, err
 }
 
-func (r *flowRepo) ListByWorkspace(ctx context.Context, flowID uuid.UUID) ([]domain.Flow, error) {
+func (r *flowRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Flow, error) {
 	var flows []domain.Flow
-	err := r.db.WithContext(ctx).Where("flow_id = ?", flowID).Find(&flows).Error
+	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Find(&flows).Error
 	return flows, err
 }
 
@@ -38,5 +38,10 @@ func (r *flowRepo) Update(ctx context.Context, req *domain.Flow) error {
 }
 
 func (r *flowRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	return r.db.WithContext(ctx).Delete(&domain.Flow{}, id).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("flow_id = ?", id).Delete(&domain.Request{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&domain.Flow{}, id).Error
+	})
 }

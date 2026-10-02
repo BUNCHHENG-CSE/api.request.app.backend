@@ -6,32 +6,156 @@ import (
 	"api.request.app.backend/internal/application"
 	"api.request.app.backend/internal/interfaces/api/response"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type FlowHandler struct {
-	service application.FlowService
+	service        application.FlowService
+	requestService application.RequestService
 }
 
-func NewFlowHandler(service application.FlowService) *FlowHandler {
-	return &FlowHandler{service: service}
+func NewFlowHandler(service application.FlowService, requestService application.RequestService) *FlowHandler {
+	return &FlowHandler{service: service, requestService: requestService}
 }
+
+func (h *FlowHandler) Run(c *gin.Context) {
+	id, ok := pathUUID(c, "id", "flow")
+	if !ok {
+		return
+	}
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	if _, err := h.service.GetFlow(c.Request.Context(), ownerID, id); err != nil {
+		serviceError(c, err)
+		return
+	}
+	var req struct {
+		EnvironmentID *uuid.UUID `json:"environment_id"`
+		StopOnError   *bool      `json:"stop_on_error"`
+	}
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			response.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	stopOnError := true
+	if req.StopOnError != nil {
+		stopOnError = *req.StopOnError
+	}
+	requests, err := h.requestService.GetRequestsByFlow(c.Request.Context(), ownerID, id)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+	results := make([]gin.H, 0, len(requests))
+	for _, stored := range requests {
+		result, runErr := h.requestService.ExecuteRequest(c.Request.Context(), ownerID, stored.ID, req.EnvironmentID)
+		if runErr != nil {
+			results = append(results, gin.H{"request_id": stored.ID, "error": runErr.Error()})
+			if stopOnError {
+				break
+			}
+			continue
+		}
+		results = append(results, gin.H{"request_id": stored.ID, "result": result})
+	}
+	response.Success(c, http.StatusOK, "Flow run completed", gin.H{"flow_id": id, "results": results})
+}
+
 func (h *FlowHandler) Create(c *gin.Context) {
-	// Optimized: A Flow is usually created inside a Workspace, requiring a Name.
 	var req CreateFlowRequest
-
-	// 1. Bind and validate the JSON payload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	// 2. Pass to the Application Service layer
-	flow, err := h.service.CreateFlow(c.Request.Context(), req.WorkspaceID, req.Name, req.Description)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
 		return
 	}
+	flow, err := h.service.CreateFlow(c.Request.Context(), ownerID, req.WorkspaceID, req.Name, req.Description, req.Nodes, req.Edges)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+	response.Success(c, http.StatusCreated, "Flow created successfully", flow)
+}
 
-	// 3. Return standardized response
-	response.Success(c, http.StatusCreated, "Flow created successfully !!!", flow)
+func (h *FlowHandler) ListByWorkspace(c *gin.Context) {
+	workspaceID, ok := pathUUID(c, "id", "workspace")
+	if !ok {
+		return
+	}
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	flows, err := h.service.GetFlowsByWorkspace(c.Request.Context(), ownerID, workspaceID)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Flows retrieved successfully", flows)
+}
+
+func (h *FlowHandler) Get(c *gin.Context) {
+	id, ok := pathUUID(c, "id", "flow")
+	if !ok {
+		return
+	}
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	flow, err := h.service.GetFlow(c.Request.Context(), ownerID, id)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Flow retrieved successfully", flow)
+}
+
+func (h *FlowHandler) Update(c *gin.Context) {
+	id, ok := pathUUID(c, "id", "flow")
+	if !ok {
+		return
+	}
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+		Nodes       *string `json:"nodes"`
+		Edges       *string `json:"edges"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	flow, err := h.service.UpdateFlow(c.Request.Context(), ownerID, id, req.Name, req.Description, req.Nodes, req.Edges)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Flow updated successfully", flow)
+}
+
+func (h *FlowHandler) Delete(c *gin.Context) {
+	id, ok := pathUUID(c, "id", "flow")
+	if !ok {
+		return
+	}
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteFlow(c.Request.Context(), ownerID, id); err != nil {
+		serviceError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Flow deleted successfully", gin.H{})
 }

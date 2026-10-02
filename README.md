@@ -1,80 +1,70 @@
-# FlowAPI Backend - Go Implementation
+# FlowAPI Backend
 
-A comprehensive REST API backend for FlowAPI, built with Go.
+A Go/Gin and PostgreSQL backend for storing API workspaces, flows, request definitions, environments, and collections.
 
-## Project Structure
+## Current capabilities
 
-```
-api.request.app.backend/
-├── cmd/
-│   └── api/
-│       └── main.go                 
-├── internal/
-│   ├── domain/                     
-│   │   ├── collection.go
-│   │   ├── environment.go
-│   │   ├── flow.go
-│   │   ├── request.go
-│   │   ├── user.go
-│   │   └── workspace.go
-│   ├── application/                
-│   │   ├── collection_service.go
-│   │   ├── environment_service.go
-│   │   ├── flow_service.go
-│   │   ├── request_service.go
-│   │   ├── user_service.go
-│   │   └── workspace_service.go
-│   ├── infrastructure/            
-│   │   ├── database/
-│   │   │   └── postgres.go         
-│   │   ├── repositories/           
-│   │   │   ├── collection_repo.go
-│   │   │   ├── environment_repo.go
-│   │   │   ├── flow_repo.go
-│   │   │   ├── request_repo.go
-│   │   │   ├── user_repo.go
-│   │   │   └── workspace_repo.go
-│   │   └── config/
-│   │       └── config.go
-│   └── interfaces/                 
-│       ├── api/
-│       │   ├── handlers/
-│       │   │   ├── collection_handler.go
-│       │   │   ├── environment_handler.go
-│       │   │   ├── flow_handler.go
-│       │   │   ├── request_handler.go
-│       │   │   ├── requests.go
-│       │   │   ├── user_handler.go
-│       │   │   └── workspace_handler.go
-│       │   ├── routes/
-│       │   │   └── routes.go       
-│       │   ├── middleware/
-│       │   │   └── auth.go
-│       │   └── response/
-│       │       └── response.go
-├── .env
-├── docker-compose.yml
-├── go.mod
-└── go.sum
+- User registration and JWT login
+- Bcrypt password hashing
+- Authenticated current-password verification and password changes
+- Authenticated workspace CRUD
+- CRUD for flows, stored requests, environments, and collections
+- Backend execution of stored HTTP requests
+- Environment-variable substitution and persistent execution history
+- Request duplication, bulk deletion, and sequential flow runs
+- Workspace-scoped global search
+- SSRF-aware outbound networking, CORS, security headers, and graceful shutdown
+- Hybrid PostgreSQL plus local Bruno-style `.bru` collection storage
+- Collection/request association and flow graph fields
+- Owner checks across all resource operations
+- PostgreSQL persistence through GORM
+- Docker Compose development setup
+- Health check at `GET /health`
+
+This is an early API, not yet a complete Postman-style collaboration and automation platform. See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for the exact endpoint contract and remaining gaps.
+
+## Run locally
+
+Create a `.env` file containing at least:
+
+```dotenv
+SERVER_PORT=8080
+JWT_SECRET=replace-with-a-long-random-secret
+DATABASE_URL=host=localhost user=postgres password=secret dbname=request_app port=5432 sslmode=disable
+ALLOWED_ORIGINS=http://localhost:3000
+ALLOW_PRIVATE_REQUESTS=false
+LOCAL_COLLECTIONS_ROOT=./data/collections
 ```
 
-## Key Features
+Then start the database and API:
 
-- User Authentication & Authorization
-- Workspace & Collection Management
-- API Request Management with full HTTP support
-- Environment Variable Management
-- Authorization Types (Bearer, Basic, API Key, OAuth2)
-- Request/Response Scripts
-- Team Collaboration
-- Request History & Search
-- Visual Flow Builder
-- OpenAPI Spec Management
+```bash
+docker compose up --build
+```
 
-## Database
+For a Go process running outside Docker, make sure `DATABASE_URL` uses `host=localhost`. Inside Docker Compose, use `host=db`.
 
-PostgreSQL with proper indexing and relationships.
+## Development checks
 
-## Deployment
+```bash
+go test ./...
+go vet ./...
+```
 
-Docker-ready with docker-compose for local development.
+## Project layout
+
+```text
+cmd/api/                         application entry point
+internal/domain/                 entities and repository contracts
+internal/application/            business services
+internal/infrastructure/         PostgreSQL repositories and configuration
+internal/interfaces/api/         Gin handlers, middleware, responses, and routes
+```
+
+## Before production
+
+- Add pagination, filtering, and ordering as required by the client.
+- Configure an outbound domain allowlist if deployments require stricter egress policy.
+- Replace automatic schema migration with versioned migrations.
+- Add CORS policy, rate limiting, structured logs, request IDs, and graceful shutdown.
+- Store environment secrets encrypted and avoid returning them from list endpoints.

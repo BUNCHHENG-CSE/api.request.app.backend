@@ -29,7 +29,7 @@ func (r *requestRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Reques
 
 func (r *requestRepo) ListByFlow(ctx context.Context, flowID uuid.UUID) ([]domain.Request, error) {
 	var requests []domain.Request
-	err := r.db.WithContext(ctx).Where("flow_id = ?", flowID).Find(&requests).Error
+	err := r.db.WithContext(ctx).Where("flow_id = ?", flowID).Order("position ASC, created_at ASC").Find(&requests).Error
 	return requests, err
 }
 

@@ -11,7 +11,7 @@ import (
 type Workspace struct {
 	ID        uuid.UUID `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	Name      string    `json:"name"`
-	OwnerID   uuid.UUID `json:"owner_id" gorm:"type:uuid"`
+	OwnerID   uuid.UUID `json:"owner_id" gorm:"type:uuid;not null;index"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -20,6 +20,8 @@ type Workspace struct {
 // This Dependency Inversion keeps the domain unaware of GORM.
 type WorkspaceRepository interface {
 	Create(ctx context.Context, workspace *Workspace) error
-	GetByID(ctx context.Context, id uuid.UUID) (*Workspace, error)
-	List(ctx context.Context) ([]Workspace, error)
+	GetByID(ctx context.Context, id, ownerID uuid.UUID) (*Workspace, error)
+	List(ctx context.Context, ownerID uuid.UUID) ([]Workspace, error)
+	Update(ctx context.Context, workspace *Workspace) error
+	Delete(ctx context.Context, id, ownerID uuid.UUID) error
 }

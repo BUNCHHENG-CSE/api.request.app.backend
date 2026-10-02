@@ -27,9 +27,9 @@ func (r *environmentRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.En
 	return &environment, err
 }
 
-func (r *environmentRepo) ListByWorkspace(ctx context.Context, flowID uuid.UUID) ([]domain.Environment, error) {
+func (r *environmentRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Environment, error) {
 	var environments []domain.Environment
-	err := r.db.WithContext(ctx).Where("flow_id = ?", flowID).Find(&environments).Error
+	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Find(&environments).Error
 	return environments, err
 }
 

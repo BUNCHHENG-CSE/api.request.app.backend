@@ -10,8 +10,8 @@ import (
 // User represents the core user entity.
 type User struct {
 	ID        uuid.UUID `json:"id" gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
-	Username  string    `json:"username"`
-	Email     string    `json:"email"`
+	Username  string    `json:"username" gorm:"not null"`
+	Email     string    `json:"email" gorm:"not null;uniqueIndex"`
 	Password  string    `json:"-"` // Omitted from JSON responses for security
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -22,4 +22,5 @@ type UserRepository interface {
 	Create(ctx context.Context, user *User) error
 	GetByID(ctx context.Context, id uuid.UUID) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
+	Update(ctx context.Context, user *User) error
 }
