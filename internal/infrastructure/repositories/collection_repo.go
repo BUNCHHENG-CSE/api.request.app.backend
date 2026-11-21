@@ -29,7 +29,7 @@ func (r *collectionRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Col
 
 func (r *collectionRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Collection, error) {
 	var collections []domain.Collection
-	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Find(&collections).Error
+	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Order("created_at ASC").Find(&collections).Error
 	return collections, err
 }
 

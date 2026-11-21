@@ -11,37 +11,54 @@ import (
 	"github.com/google/uuid"
 )
 
-type requestRepoMemory struct{ request *domain.Request }
+type requestRepoMemory struct {
+	items map[uuid.UUID]*domain.Request
+}
+
+func newRequestRepoMemory() *requestRepoMemory {
+	return &requestRepoMemory{items: make(map[uuid.UUID]*domain.Request)}
+}
 
 func (r *requestRepoMemory) Create(_ context.Context, req *domain.Request) error {
-	req.ID = uuid.New()
-	r.request = req
+	if req.ID == uuid.Nil {
+		req.ID = uuid.New()
+	}
+	copy := *req
+	r.items[req.ID] = &copy
 	return nil
 }
 func (r *requestRepoMemory) GetByID(_ context.Context, id uuid.UUID) (*domain.Request, error) {
-	if r.request == nil || r.request.ID != id {
+	req, ok := r.items[id]
+	if !ok || req == nil {
 		return nil, errors.New("request not found")
 	}
-	return r.request, nil
+	return req, nil
 }
 func (r *requestRepoMemory) ListByFlow(_ context.Context, flowID uuid.UUID) ([]domain.Request, error) {
-	if r.request != nil && r.request.FlowID == flowID {
-		return []domain.Request{*r.request}, nil
+	var list []domain.Request
+	for _, req := range r.items {
+		if req.FlowID == flowID {
+			list = append(list, *req)
+		}
 	}
-	return []domain.Request{}, nil
+	return list, nil
 }
 func (r *requestRepoMemory) Update(_ context.Context, req *domain.Request) error {
-	r.request = req
+	copy := *req
+	r.items[req.ID] = &copy
 	return nil
 }
 func (r *requestRepoMemory) Delete(_ context.Context, id uuid.UUID) error {
-	r.request = nil
+	delete(r.items, id)
 	return nil
 }
 
 type flowRepoMemory struct{ flow *domain.Flow }
 
 func (r *flowRepoMemory) Create(_ context.Context, flow *domain.Flow) error {
+	if flow.ID == uuid.Nil {
+		flow.ID = uuid.New()
+	}
 	r.flow = flow
 	return nil
 }
@@ -80,7 +97,13 @@ func (r *workspaceRepoMemory) Delete(context.Context, uuid.UUID, uuid.UUID) erro
 
 type collectionRepoMemory struct{ collection *domain.Collection }
 
-func (r *collectionRepoMemory) Create(context.Context, *domain.Collection) error { return nil }
+func (r *collectionRepoMemory) Create(_ context.Context, col *domain.Collection) error {
+	if col.ID == uuid.Nil {
+		col.ID = uuid.New()
+	}
+	r.collection = col
+	return nil
+}
 func (r *collectionRepoMemory) GetByID(_ context.Context, id uuid.UUID) (*domain.Collection, error) {
 	if r.collection == nil || r.collection.ID != id {
 		return nil, errors.New("collection not found")
@@ -149,7 +172,7 @@ func TestRequestServiceExecuteAndOwnership(t *testing.T) {
 	defer server.Close()
 
 	ownerID, workspaceID, flowID, environmentID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	requests := &requestRepoMemory{}
+	requests := newRequestRepoMemory()
 	flows := &flowRepoMemory{flow: &domain.Flow{ID: flowID, WorkspaceID: workspaceID}}
 	workspaces := &workspaceRepoMemory{workspace: &domain.Workspace{ID: workspaceID, OwnerID: ownerID}}
 	histories := &historyRepoMemory{}
@@ -177,5 +200,79 @@ func TestRequestServiceExecuteAndOwnership(t *testing.T) {
 
 	if _, err := service.GetRequest(context.Background(), uuid.New(), stored.ID); err == nil {
 		t.Fatal("a different owner was allowed to access the request")
+	}
+}
+
+func TestRequestServiceAuthAndVariableWithSpaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("Authorization") != "Bearer secret-token-123" {
+			t.Errorf("auth header not applied properly: %s", req.Header.Get("Authorization"))
+		}
+		if req.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("auto Content-Type not applied: %s", req.Header.Get("Content-Type"))
+		}
+		if req.URL.Query().Get("page") != "1" {
+			t.Errorf("array query parameter not applied: %s", req.URL.Query().Get("page"))
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"authorized"}`))
+	}))
+	defer server.Close()
+
+	ownerID, workspaceID, flowID, envID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	requests := newRequestRepoMemory()
+	flows := &flowRepoMemory{flow: &domain.Flow{ID: flowID, WorkspaceID: workspaceID}}
+	workspaces := &workspaceRepoMemory{workspace: &domain.Workspace{ID: workspaceID, OwnerID: ownerID}}
+	histories := &historyRepoMemory{}
+	environments := &environmentRepoMemory{environment: &domain.Environment{
+		ID:          envID,
+		WorkspaceID: workspaceID,
+		Variables:   `{"my_token":"secret-token-123"}`,
+	}}
+	service := NewRequestService(requests, flows, workspaces, &collectionRepoMemory{}, environments, histories, true)
+
+	// Note spaces in {{ my_token }} and array query params
+	stored, err := service.CreateRequest(context.Background(), ownerID, RequestInput{
+		FlowID:      flowID,
+		Method:      http.MethodPost,
+		URL:         server.URL,
+		QueryParams: `[{"key": "page", "value": 1, "enabled": true}, {"key": "disabled", "value": "x", "enabled": false}]`,
+		Body:        `{"hello":"world"}`,
+		BodyType:    "json",
+		Auth:        `{"type":"bearer","token":"{{ my_token }}"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := service.ExecuteRequest(context.Background(), ownerID, stored.ID, &envID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.Status)
+	}
+}
+
+func TestRequestServiceBulkDelete(t *testing.T) {
+	ownerID, workspaceID, flowID := uuid.New(), uuid.New(), uuid.New()
+	requests := newRequestRepoMemory()
+	flows := &flowRepoMemory{flow: &domain.Flow{ID: flowID, WorkspaceID: workspaceID}}
+	workspaces := &workspaceRepoMemory{workspace: &domain.Workspace{ID: workspaceID, OwnerID: ownerID}}
+	service := NewRequestService(requests, flows, workspaces, &collectionRepoMemory{}, &environmentRepoMemory{}, &historyRepoMemory{}, true)
+
+	req1, _ := service.CreateRequest(context.Background(), ownerID, RequestInput{FlowID: flowID, Method: "GET", URL: "http://example.com/1"})
+	req2, _ := service.CreateRequest(context.Background(), ownerID, RequestInput{FlowID: flowID, Method: "GET", URL: "http://example.com/2"})
+
+	err := service.BulkDeleteRequests(context.Background(), ownerID, []uuid.UUID{req1.ID, req2.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.GetRequest(context.Background(), ownerID, req1.ID); err == nil {
+		t.Fatal("req1 should have been deleted")
+	}
+	if _, err := service.GetRequest(context.Background(), ownerID, req2.ID); err == nil {
+		t.Fatal("req2 should have been deleted")
 	}
 }

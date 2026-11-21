@@ -66,6 +66,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to initialize local collection storage:", err)
 	}
+	importerService := application.NewImporterService(requestService, flowService, workspaceRepo, flowRepo, requestRepo, collectionRepo)
+	snippetService := application.NewSnippetService(requestService)
 
 	// 4. Initialize Handlers (Interfaces Layer)
 	userHandler := handlers.NewUserHandler(userService)
@@ -76,6 +78,9 @@ func main() {
 	collectionHandler := handlers.NewCollectionHandler(collectionService, requestService)
 	searchHandler := handlers.NewSearchHandler(searchService)
 	localCollectionHandler := handlers.NewLocalCollectionHandler(localCollectionService)
+	importerHandler := handlers.NewImporterHandler(importerService)
+	snippetHandler := handlers.NewSnippetHandler(snippetService)
+	mockHandler := handlers.NewMockHandler(workspaceRepo, flowRepo, requestRepo)
 
 	// 5. Setup Router and Inject Handlers
 	router := routes.SetupRouter(
@@ -87,6 +92,9 @@ func main() {
 		collectionHandler,
 		searchHandler,
 		localCollectionHandler,
+		importerHandler,
+		snippetHandler,
+		mockHandler,
 		cfg.JWTSecret,
 		cfg.AllowedOrigins,
 	)

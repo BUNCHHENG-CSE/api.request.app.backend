@@ -5,8 +5,6 @@ import (
 
 	"api.request.app.backend/internal/application"
 	"api.request.app.backend/internal/interfaces/api/response"
-	"github.com/google/uuid"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,51 +26,46 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		return
 	}
 
-	ownerID, ok := c.Get("user_id")
+	ownerID, ok := authenticatedUserID(c)
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, "authenticated user is required")
 		return
 	}
-	workspace, err := h.service.CreateWorkspace(c.Request.Context(), req.Name, ownerID.(uuid.UUID))
+	workspace, err := h.service.CreateWorkspace(c.Request.Context(), req.Name, ownerID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 
-	response.Success(c, http.StatusCreated, "Workspace created successfully!!!", workspace)
+	response.Success(c, http.StatusCreated, "Workspace created successfully", workspace)
 }
 
 func (h *WorkspaceHandler) Get(c *gin.Context) {
-
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "invalid id")
-		return
-	}
-
-	ownerID, ok := c.Get("user_id")
+	id, ok := pathUUID(c, "id", "workspace")
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, "authenticated user is required")
-		return
-	}
-	workspace, err := h.service.GetWorkspace(c.Request.Context(), id, ownerID.(uuid.UUID))
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "workspace not found")
 		return
 	}
 
-	response.Success(c, http.StatusOK, "Get workspace successfully!!!", workspace)
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	workspace, err := h.service.GetWorkspace(c.Request.Context(), id, ownerID)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+
+	response.Success(c, http.StatusOK, "Workspace retrieved successfully", workspace)
 }
 
 func (h *WorkspaceHandler) List(c *gin.Context) {
-	ownerID, ok := c.Get("user_id")
+	ownerID, ok := authenticatedUserID(c)
 	if !ok {
-		response.Error(c, http.StatusUnauthorized, "authenticated user is required")
 		return
 	}
-	workspaces, err := h.service.ListWorkspaces(c.Request.Context(), ownerID.(uuid.UUID))
+	workspaces, err := h.service.ListWorkspaces(c.Request.Context(), ownerID)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 	response.Success(c, http.StatusOK, "Workspaces retrieved successfully", workspaces)

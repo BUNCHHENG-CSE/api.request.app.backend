@@ -45,9 +45,12 @@ func TestUserServiceHashesPasswordAndLogsIn(t *testing.T) {
 	const secret = "test-secret"
 	service := NewUserService(repo, secret)
 
-	user, err := service.CreateUser(context.Background(), "alice", "alice@example.com", "password123")
+	user, err := service.CreateUser(context.Background(), "alice", "Alice@Example.COM", "password123")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if user.Email != "alice@example.com" {
+		t.Fatalf("expected normalized email alice@example.com, got %s", user.Email)
 	}
 	if user.Password == "password123" {
 		t.Fatal("password was stored in plain text")
@@ -56,7 +59,8 @@ func TestUserServiceHashesPasswordAndLogsIn(t *testing.T) {
 		t.Fatalf("stored password is not a valid hash: %v", err)
 	}
 
-	tokenString, loggedInUser, err := service.Login(context.Background(), user.Email, "password123")
+	// Login with lowercase email
+	tokenString, loggedInUser, err := service.Login(context.Background(), "alice@example.com", "password123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +74,21 @@ func TestUserServiceHashesPasswordAndLogsIn(t *testing.T) {
 
 	if _, _, err := service.Login(context.Background(), user.Email, "wrong-password"); err == nil {
 		t.Fatal("login accepted an invalid password")
+	}
+}
+
+func TestUserServiceDuplicateEmail(t *testing.T) {
+	repo := &userRepoStub{}
+	service := NewUserService(repo, "test-secret")
+	_, err := service.CreateUser(context.Background(), "alice", "alice@example.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Attempting to register with duplicate email (different case)
+	_, err = service.CreateUser(context.Background(), "alice2", "ALICE@example.com", "password123")
+	if !errors.Is(err, ErrEmailAlreadyInUse) {
+		t.Fatalf("expected ErrEmailAlreadyInUse, got: %v", err)
 	}
 }
 

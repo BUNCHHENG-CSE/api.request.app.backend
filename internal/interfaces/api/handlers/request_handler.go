@@ -27,12 +27,22 @@ func (h *RequestHandler) Create(c *gin.Context) {
 		return
 	}
 	created, err := h.service.CreateRequest(c.Request.Context(), ownerID, application.RequestInput{
-		FlowID: req.FlowID, CollectionID: req.CollectionID, Name: req.Name, Position: req.Position, Method: req.Method, URL: req.URL,
-		Headers: req.Headers, QueryParams: req.QueryParams, Body: req.Body, BodyType: req.BodyType,
-		Auth: req.Auth, Scripts: req.Scripts, Settings: req.Settings,
+		FlowID:       req.FlowID,
+		CollectionID: req.CollectionID,
+		Name:         req.Name,
+		Position:     req.Position,
+		Method:       req.Method,
+		URL:          req.URL,
+		Headers:      req.Headers,
+		QueryParams:  req.QueryParams,
+		Body:         req.Body,
+		BodyType:     req.BodyType,
+		Auth:         req.Auth,
+		Scripts:      req.Scripts,
+		Settings:     req.Settings,
 	})
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
+		serviceError(c, err)
 		return
 	}
 	response.Success(c, http.StatusCreated, "Request created successfully", created)
@@ -87,12 +97,21 @@ func (h *RequestHandler) Update(c *gin.Context) {
 		return
 	}
 	updated, err := h.service.UpdateRequest(c.Request.Context(), ownerID, id, application.RequestPatch{
-		FlowID: req.FlowID, Name: req.Name, Position: req.Position, Method: req.Method, URL: req.URL, Headers: req.Headers,
-		QueryParams: req.QueryParams, Body: req.Body, BodyType: req.BodyType, Auth: req.Auth,
-		Scripts: req.Scripts, Settings: req.Settings,
+		FlowID:      req.FlowID,
+		Name:        req.Name,
+		Position:    req.Position,
+		Method:      req.Method,
+		URL:         req.URL,
+		Headers:     req.Headers,
+		QueryParams: req.QueryParams,
+		Body:        req.Body,
+		BodyType:    req.BodyType,
+		Auth:        req.Auth,
+		Scripts:     req.Scripts,
+		Settings:    req.Settings,
 	})
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
+		serviceError(c, err)
 		return
 	}
 	response.Success(c, http.StatusOK, "Request updated successfully", updated)
@@ -134,7 +153,7 @@ func (h *RequestHandler) Execute(c *gin.Context) {
 	}
 	result, err := h.service.ExecuteRequest(c.Request.Context(), ownerID, id, req.EnvironmentID)
 	if err != nil {
-		response.Error(c, http.StatusBadGateway, err.Error())
+		serviceError(c, err)
 		return
 	}
 	response.Success(c, http.StatusOK, "Request executed successfully", result)
@@ -183,6 +202,16 @@ func (h *RequestHandler) ListHistory(c *gin.Context) {
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
 	var workspaceID *uuid.UUID
 	if raw := c.Query("workspace_id"); raw != "" {
 		parsed, err := uuid.Parse(raw)
@@ -196,15 +225,6 @@ func (h *RequestHandler) ListHistory(c *gin.Context) {
 	if err != nil {
 		serviceError(c, err)
 		return
-	}
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
 	}
 	response.Success(c, http.StatusOK, "History retrieved successfully", gin.H{"items": items, "total": total, "page": page, "limit": limit})
 }

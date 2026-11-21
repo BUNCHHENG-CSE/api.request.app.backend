@@ -29,7 +29,7 @@ func (r *environmentRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.En
 
 func (r *environmentRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Environment, error) {
 	var environments []domain.Environment
-	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Find(&environments).Error
+	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Order("created_at ASC").Find(&environments).Error
 	return environments, err
 }
 

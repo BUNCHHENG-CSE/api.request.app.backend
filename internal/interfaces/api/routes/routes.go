@@ -17,6 +17,9 @@ func SetupRouter(
 	collectionHandler *handlers.CollectionHandler,
 	searchHandler *handlers.SearchHandler,
 	localCollectionHandler *handlers.LocalCollectionHandler,
+	importerHandler *handlers.ImporterHandler,
+	snippetHandler *handlers.SnippetHandler,
+	mockHandler *handlers.MockHandler,
 	jwtSecret string,
 	allowedOrigins string,
 ) *gin.Engine {
@@ -28,6 +31,9 @@ func SetupRouter(
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	// Public Mock Server Route: matches simulated requests for any workspace
+	router.Any("/api/v1/mock/:workspaceId/*path", mockHandler.ServeMock)
 
 	v1 := router.Group("/api/v1")
 	{
@@ -79,6 +85,8 @@ func SetupRouter(
 				requests.POST("/:id/execute", requestHandler.Execute)
 				requests.POST("/:id/duplicate", requestHandler.Duplicate)
 				requests.POST("/bulk-delete", requestHandler.BulkDelete)
+				requests.POST("/import-curl", importerHandler.ImportCurl)
+				requests.GET("/:id/snippet", snippetHandler.Generate)
 			}
 
 			history := protected.Group("/history")
@@ -104,6 +112,7 @@ func SetupRouter(
 				collections.DELETE("/:id", collectionHandler.Delete)
 				collections.POST("/:id/requests/:requestId", collectionHandler.AddRequest)
 				collections.DELETE("/:id/requests/:requestId", collectionHandler.RemoveRequest)
+				collections.POST("/import-postman", importerHandler.ImportPostman)
 			}
 
 			localCollections := protected.Group("/local-collections")
@@ -112,6 +121,11 @@ func SetupRouter(
 				localCollections.GET("/:workspaceId", localCollectionHandler.Get)
 				localCollections.POST("/:workspaceId/import", localCollectionHandler.Import)
 				localCollections.DELETE("/:workspaceId", localCollectionHandler.Delete)
+				localCollections.GET("/:workspaceId/export-zip", localCollectionHandler.ExportZip)
+				localCollections.POST("/:workspaceId/import-zip", localCollectionHandler.ImportZip)
+				localCollections.GET("/:workspaceId/files", localCollectionHandler.GetFiles)
+				localCollections.GET("/:workspaceId/file", localCollectionHandler.ReadFile)
+				localCollections.PUT("/:workspaceId/file", localCollectionHandler.WriteFile)
 			}
 		}
 	}

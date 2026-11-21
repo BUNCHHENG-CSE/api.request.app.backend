@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"api.request.app.backend/internal/application"
 	"api.request.app.backend/internal/interfaces/api/response"
@@ -50,19 +51,48 @@ func (h *FlowHandler) Run(c *gin.Context) {
 		serviceError(c, err)
 		return
 	}
+
+	started := time.Now()
 	results := make([]gin.H, 0, len(requests))
+	passed := 0
+	failed := 0
+	totalTestsPassed := 0
+	totalTestsFailed := 0
+
 	for _, stored := range requests {
 		result, runErr := h.requestService.ExecuteRequest(c.Request.Context(), ownerID, stored.ID, req.EnvironmentID)
 		if runErr != nil {
-			results = append(results, gin.H{"request_id": stored.ID, "error": runErr.Error()})
+			failed++
+			results = append(results, gin.H{
+				"request_id": stored.ID,
+				"name":       stored.Name,
+				"error":      runErr.Error(),
+			})
 			if stopOnError {
 				break
 			}
 			continue
 		}
-		results = append(results, gin.H{"request_id": stored.ID, "result": result})
+		passed++
+		totalTestsPassed += result.TestsPassed
+		totalTestsFailed += result.TestsFailed
+		results = append(results, gin.H{
+			"request_id": stored.ID,
+			"name":       stored.Name,
+			"result":     result,
+		})
 	}
-	response.Success(c, http.StatusOK, "Flow run completed", gin.H{"flow_id": id, "results": results})
+
+	response.Success(c, http.StatusOK, "Flow run completed", gin.H{
+		"flow_id":            id,
+		"results":            results,
+		"total_requests":     len(requests),
+		"passed":             passed,
+		"failed":             failed,
+		"total_tests_passed": totalTestsPassed,
+		"total_tests_failed": totalTestsFailed,
+		"duration_ms":        time.Since(started).Milliseconds(),
+	})
 }
 
 func (h *FlowHandler) Create(c *gin.Context) {

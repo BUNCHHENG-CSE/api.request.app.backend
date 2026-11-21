@@ -329,9 +329,9 @@ Only `flow_id`, `method`, and `url` are required. `collection_id` is optional. T
 - `scripts`
 - `settings`
 
-The JSON-like fields remain JSON-encoded strings for compatibility with the current frontend types.
+The JSON-like fields remain JSON-encoded strings for compatibility with the current frontend types. Both JSON objects (e.g., `{"key": "value"}`) and arrays of key-value items (e.g., `[{"key": "k", "value": "v", "enabled": true}]`) with string, numeric, or boolean values are supported.
 
-`auth`, `scripts`, and `settings` are persisted metadata only in this version. The executor currently applies the method, URL, query parameters, headers, and body.
+`auth` supports Bearer tokens (`{"type":"bearer","token":"..."}`), Basic authentication (`{"type":"basic","username":"...","password":"..."}`), and API Keys (`{"type":"apikey","key":"...","value":"...","in":"header|query"}`). When present, auth credentials are automatically applied to outbound executions unless explicitly overridden in `headers`. `scripts` and `settings` remain persisted metadata in this version.
 
 ### Execute a stored request
 
@@ -502,6 +502,96 @@ Import response data:
 
 Import is non-destructive: removing a `.bru` file does not automatically delete the database request. Use the API delete endpoint for explicit deletion, then export again.
 
+### Export Bruno collection as ZIP archive
+
+```http
+GET /api/v1/local-collections/:workspaceId/export-zip
+Authorization: Bearer <token>
+```
+
+Exports the entire Bruno collection directory into a downloadable `.zip` archive (`application/zip`) formatted with `bruno.json`, `environments/*.bru`, and `requests/*/*.bru`.
+
+### Import Bruno collection from ZIP archive
+
+```http
+POST /api/v1/local-collections/:workspaceId/import-zip
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+```
+
+Upload a `.zip` archive containing a Bruno collection. Safely unpacks the files into the workspace directory on local disk and updates all database records.
+
+### Browse and edit local Bruno collection files
+
+- **List collection file tree:** `GET /api/v1/local-collections/:workspaceId/files`
+  Returns an array of `{ "path": "...", "is_dir": bool, "size": int, "modified": time }`.
+- **Read local file:** `GET /api/v1/local-collections/:workspaceId/file?path=bruno.json`
+- **Write local file:** `PUT /api/v1/local-collections/:workspaceId/file` with body `{"path": "requests/.../request.bru", "content": "..."}`.
+
+### Import from cURL
+
+```http
+POST /api/v1/requests/import-curl
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "flow_id": "flow-uuid",
+  "curl": "curl -X POST 'https://api.example.com/users' -H 'Authorization: Bearer token' -d '{\"name\":\"Alice\"}'"
+}
+```
+
+Parses method, URL, headers, query params, body, and auth into a stored request.
+
+### Import from Postman Collection (v2.1)
+
+```http
+POST /api/v1/collections/import-postman
+Authorization: Bearer <token>
+Content-Type: application/json (or multipart/form-data with "file")
+
+{
+  "workspace_id": "workspace-uuid",
+  "collection": { ...postman v2.1 collection JSON... }
+}
+```
+
+Imports all folders, requests, headers, bodies, and auth credentials from a Postman v2.1 collection into the workspace.
+
+### Generate Code Snippets
+
+```http
+GET /api/v1/requests/:id/snippet?language=curl
+Authorization: Bearer <token>
+```
+
+Supported languages: `curl`, `javascript` (fetch), `python` (requests), `golang` (net/http). Returns an executable code snippet.
+
+### Mock Server Engine
+
+```http
+ANY /api/v1/mock/:workspaceId/*path
+```
+
+Public or authenticated mock endpoint. Dynamically matches simulated routes against stored requests in the workspace. If the request defines mock settings in its `settings` field (`mock_status`, `mock_body`, `mock_headers`, `mock_content_type`), it returns that response. Otherwise, it returns an intelligent simulated response.
+
+### Declarative Assertions & Test Runner
+
+Requests support declarative test assertions configured in `scripts` or `settings` as a JSON array:
+
+```json
+[
+  {"target": "status", "operator": "equals", "expected": 200},
+  {"target": "time", "operator": "less_than", "expected": 1000},
+  {"target": "header", "property": "Content-Type", "operator": "contains", "expected": "application/json"},
+  {"target": "body", "operator": "contains", "expected": "success"},
+  {"target": "json_field", "property": "data.id", "operator": "exists"},
+  {"target": "json_field", "property": "status", "operator": "equals", "expected": "ok"}
+]
+```
+
+When executing a request or running a flow, the engine evaluates each assertion against the response and returns `assertions`, `tests_passed`, and `tests_failed` in the result payload.
+
 ### Delete the local copy
 
 `DELETE /local-collections/:workspaceId` removes only the directory beneath `LOCAL_COLLECTIONS_ROOT`. It does not delete the PostgreSQL workspace or its resources.
@@ -541,11 +631,12 @@ The server also applies request IDs, security headers, HTTP timeouts, database c
 |---|---|
 | `200` | Successful read, update, delete, refresh, logout, association, or execution |
 | `201` | Resource created |
-| `400` | Invalid UUID, JSON, URL, method, or request data |
-| `401` | Missing, expired, or invalid bearer token |
-| `403` | Authenticated user attempted a forbidden profile operation |
+| `400` | Invalid UUID, JSON, URL, method, or request validation error |
+| `401` | Missing, expired, or invalid bearer token / credentials |
+| `403` | Authenticated user attempted a forbidden operation or ownership mismatch |
 | `404` | Resource not found or not owned by the authenticated user |
-| `502` | Outbound stored-request execution failed |
+| `409` | Conflict (e.g., email already in use) |
+| `502` | Outbound stored-request execution failed (network/target unreachable) |
 
 ## Recommended frontend sequence
 

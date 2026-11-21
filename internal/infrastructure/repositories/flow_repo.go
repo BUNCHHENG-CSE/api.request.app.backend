@@ -29,7 +29,7 @@ func (r *flowRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Flow, err
 
 func (r *flowRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Flow, error) {
 	var flows []domain.Flow
-	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Find(&flows).Error
+	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Order("created_at ASC").Find(&flows).Error
 	return flows, err
 }
 

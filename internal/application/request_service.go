@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 )
 
 const maxExecutionResponseBytes = 2 * 1024 * 1024
+
+var variableRegex = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_\-\.]+)\s*\}\}`)
 
 type RequestInput struct {
 	FlowID       uuid.UUID
@@ -51,14 +54,17 @@ type RequestPatch struct {
 }
 
 type ExecutionResult struct {
-	HistoryID  uuid.UUID         `json:"history_id"`
-	Status     int               `json:"status"`
-	StatusText string            `json:"statusText"`
-	Time       int64             `json:"time"`
-	Size       string            `json:"size"`
-	Headers    map[string]string `json:"headers"`
-	Body       string            `json:"body"`
-	Truncated  bool              `json:"truncated"`
+	HistoryID   uuid.UUID         `json:"history_id"`
+	Status      int               `json:"status"`
+	StatusText  string            `json:"statusText"`
+	Time        int64             `json:"time"`
+	Size        string            `json:"size"`
+	Headers     map[string]string `json:"headers"`
+	Body        string            `json:"body"`
+	Truncated   bool              `json:"truncated"`
+	Assertions  []AssertionResult `json:"assertions,omitempty"`
+	TestsPassed int               `json:"tests_passed"`
+	TestsFailed int               `json:"tests_failed"`
 }
 
 type RequestService interface {
@@ -89,10 +95,21 @@ type requestService struct {
 func NewRequestService(repo domain.RequestRepository, flowRepo domain.FlowRepository, workspaceRepo domain.WorkspaceRepository, collectionRepo domain.CollectionRepository, environmentRepo domain.EnvironmentRepository, historyRepo domain.RequestHistoryRepository, allowPrivateRequests bool) RequestService {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = guardedDialContext(allowPrivateRequests)
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 20
+	transport.IdleConnTimeout = 90 * time.Second
+	transport.ResponseHeaderTimeout = 30 * time.Second
+	transport.ExpectContinueTimeout = 1 * time.Second
+	transport.TLSHandshakeTimeout = 10 * time.Second
+
 	return &requestService{
-		repo: repo, flowRepo: flowRepo, workspaceRepo: workspaceRepo, collectionRepo: collectionRepo,
-		environmentRepo: environmentRepo, historyRepo: historyRepo,
-		httpClient: &http.Client{Timeout: 30 * time.Second, Transport: transport},
+		repo:            repo,
+		flowRepo:        flowRepo,
+		workspaceRepo:   workspaceRepo,
+		collectionRepo:  collectionRepo,
+		environmentRepo: environmentRepo,
+		historyRepo:     historyRepo,
+		httpClient:      &http.Client{Timeout: 30 * time.Second, Transport: transport},
 	}
 }
 
@@ -107,13 +124,26 @@ func guardedDialContext(allowPrivate bool) func(context.Context, string, string)
 		if err != nil {
 			return nil, err
 		}
+		var lastDialErr error
+		hasValidIP := false
 		for _, ip := range ips {
 			if !allowPrivate && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()) {
 				continue
 			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			hasValidIP = true
+			conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			lastDialErr = err
 		}
-		return nil, errors.New("target resolves only to blocked private or local addresses")
+		if !hasValidIP {
+			return nil, errors.New("target resolves only to blocked private or local addresses")
+		}
+		if lastDialErr != nil {
+			return nil, lastDialErr
+		}
+		return nil, errors.New("failed to connect to target host")
 	}
 }
 
@@ -149,9 +179,22 @@ func (s *requestService) CreateRequest(ctx context.Context, ownerID uuid.UUID, i
 		return nil, err
 	}
 	req := &domain.Request{
-		FlowID: input.FlowID, CollectionID: input.CollectionID, Name: input.Name, Position: input.Position, Method: method, URL: input.URL,
-		Headers: input.Headers, QueryParams: input.QueryParams, Body: input.Body, BodyType: input.BodyType,
-		Auth: input.Auth, Scripts: input.Scripts, Settings: input.Settings,
+		FlowID:       input.FlowID,
+		CollectionID: input.CollectionID,
+		Name:         strings.TrimSpace(input.Name),
+		Position:     input.Position,
+		Method:       method,
+		URL:          input.URL,
+		Headers:      input.Headers,
+		QueryParams:  input.QueryParams,
+		Body:         input.Body,
+		BodyType:     input.BodyType,
+		Auth:         input.Auth,
+		Scripts:      input.Scripts,
+		Settings:     input.Settings,
+	}
+	if req.Position < 0 {
+		return nil, errors.New("position cannot be negative")
 	}
 	if input.CollectionID != nil {
 		if err := s.validateCollection(ctx, ownerID, req, *input.CollectionID); err != nil {
@@ -194,7 +237,7 @@ func (s *requestService) UpdateRequest(ctx context.Context, ownerID, id uuid.UUI
 		req.FlowID = *patch.FlowID
 	}
 	if patch.Name != nil {
-		req.Name = *patch.Name
+		req.Name = strings.TrimSpace(*patch.Name)
 	}
 	if patch.Position != nil {
 		if *patch.Position < 0 {
@@ -307,8 +350,14 @@ func (s *requestService) BulkDeleteRequests(ctx context.Context, ownerID uuid.UU
 	if len(ids) == 0 {
 		return errors.New("at least one request ID is required")
 	}
+	// Verify all requests belong to user first
 	for _, id := range ids {
-		if err := s.DeleteRequest(ctx, ownerID, id); err != nil {
+		if _, err := s.GetRequest(ctx, ownerID, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
+		if err := s.repo.Delete(ctx, id); err != nil {
 			return err
 		}
 	}
@@ -342,10 +391,70 @@ func (s *requestService) ClearHistory(ctx context.Context, ownerID uuid.UUID) er
 }
 
 func substituteVariables(value string, variables map[string]string) string {
-	for key, replacement := range variables {
-		value = strings.ReplaceAll(value, "{{"+key+"}}", replacement)
+	if len(variables) == 0 || value == "" {
+		return value
 	}
-	return value
+	return variableRegex.ReplaceAllStringFunc(value, func(match string) string {
+		submatches := variableRegex.FindStringSubmatch(match)
+		if len(submatches) > 1 {
+			varName := submatches[1]
+			if replacement, ok := variables[varName]; ok {
+				return replacement
+			}
+		}
+		return match
+	})
+}
+
+// parseKeyValueData parses JSON into map[string]string supporting both:
+// 1) Object format: {"key": "val", "num": 1}
+// 2) Array format: [{"key": "k", "value": "v", "enabled": true}]
+func parseKeyValueData(raw string, fieldLabel string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" || raw == "[]" {
+		return map[string]string{}, nil
+	}
+
+	// Try object map format first
+	var objMap map[string]any
+	if err := json.Unmarshal([]byte(raw), &objMap); err == nil {
+		result := make(map[string]string, len(objMap))
+		for k, v := range objMap {
+			if v != nil {
+				result[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		return result, nil
+	}
+
+	// Try array of objects format
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+		result := make(map[string]string, len(arr))
+		for _, item := range arr {
+			// Check if item is explicitly disabled
+			if enabled, ok := item["enabled"].(bool); ok && !enabled {
+				continue
+			}
+			key := ""
+			if k, ok := item["key"].(string); ok {
+				key = k
+			} else if name, ok := item["name"].(string); ok {
+				key = name
+			}
+			if key == "" {
+				continue
+			}
+			val := ""
+			if v, ok := item["value"]; ok && v != nil {
+				val = fmt.Sprintf("%v", v)
+			}
+			result[key] = val
+		}
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("stored %s must be a valid JSON object or array of key-value pairs", fieldLabel)
 }
 
 func (s *requestService) executionVariables(ctx context.Context, ownerID uuid.UUID, flow *domain.Flow, environmentID *uuid.UUID) (map[string]string, error) {
@@ -364,9 +473,11 @@ func (s *requestService) executionVariables(ctx context.Context, ownerID uuid.UU
 	}
 	variables := map[string]string{}
 	if env.Variables != "" {
-		if err := json.Unmarshal([]byte(env.Variables), &variables); err != nil {
-			return nil, errors.New("environment variables must be a JSON object of string values")
+		parsed, err := parseKeyValueData(env.Variables, "environment variables")
+		if err != nil {
+			return nil, err
 		}
+		variables = parsed
 	}
 	return variables, nil
 }
@@ -389,10 +500,15 @@ func (s *requestService) ExecuteRequest(ctx context.Context, ownerID, id uuid.UU
 	executable.Headers = substituteVariables(executable.Headers, variables)
 	executable.QueryParams = substituteVariables(executable.QueryParams, variables)
 	executable.Body = substituteVariables(executable.Body, variables)
+	executable.Auth = substituteVariables(executable.Auth, variables)
+
 	result, executionErr := s.executeStored(ctx, &executable)
 	history := &domain.RequestHistory{
-		UserID: ownerID, WorkspaceID: flow.WorkspaceID, RequestID: stored.ID,
-		Method: executable.Method, URL: executable.URL,
+		UserID:      ownerID,
+		WorkspaceID: flow.WorkspaceID,
+		RequestID:   stored.ID,
+		Method:      executable.Method,
+		URL:         executable.URL,
 	}
 	if executionErr != nil {
 		history.Error = executionErr.Error()
@@ -409,7 +525,83 @@ func (s *requestService) ExecuteRequest(ctx context.Context, ownerID, id uuid.UU
 		return nil, err
 	}
 	result.HistoryID = history.ID
+
+	// Evaluate declarative assertions if defined in scripts or settings
+	assertions := evaluateAssertions(stored.Scripts, result)
+	if len(assertions) == 0 {
+		assertions = evaluateAssertions(stored.Settings, result)
+	}
+	if len(assertions) > 0 {
+		result.Assertions = assertions
+		for _, a := range assertions {
+			if a.Passed {
+				result.TestsPassed++
+			} else {
+				result.TestsFailed++
+			}
+		}
+	}
+
 	return result, nil
+}
+
+func applyAuth(outbound *http.Request, targetURL *url.URL, authRaw string) {
+	authRaw = strings.TrimSpace(authRaw)
+	if authRaw == "" || authRaw == "{}" {
+		return
+	}
+	var authMap map[string]any
+	if err := json.Unmarshal([]byte(authRaw), &authMap); err != nil {
+		return
+	}
+
+	authType := strings.ToLower(fmt.Sprintf("%v", authMap["type"]))
+
+	// Bearer Token
+	if authType == "bearer" || authMap["bearer"] != nil {
+		token := ""
+		if t, ok := authMap["token"].(string); ok && t != "" {
+			token = t
+		} else if b, ok := authMap["bearer"].(string); ok && b != "" {
+			token = b
+		} else if bMap, ok := authMap["bearer"].(map[string]any); ok {
+			token = fmt.Sprintf("%v", bMap["token"])
+		}
+		if token != "" && outbound.Header.Get("Authorization") == "" {
+			outbound.Header.Set("Authorization", "Bearer "+token)
+		}
+		return
+	}
+
+	// Basic Auth
+	if authType == "basic" || authMap["basic"] != nil {
+		username := fmt.Sprintf("%v", authMap["username"])
+		password := fmt.Sprintf("%v", authMap["password"])
+		if bMap, ok := authMap["basic"].(map[string]any); ok {
+			username = fmt.Sprintf("%v", bMap["username"])
+			password = fmt.Sprintf("%v", bMap["password"])
+		}
+		if username != "" && outbound.Header.Get("Authorization") == "" {
+			outbound.SetBasicAuth(username, password)
+		}
+		return
+	}
+
+	// API Key
+	if authType == "apikey" || authType == "api_key" {
+		key := fmt.Sprintf("%v", authMap["key"])
+		val := fmt.Sprintf("%v", authMap["value"])
+		in := strings.ToLower(fmt.Sprintf("%v", authMap["in"]))
+		if key != "" && val != "" {
+			if in == "query" {
+				q := targetURL.Query()
+				q.Set(key, val)
+				targetURL.RawQuery = q.Encode()
+			} else if outbound.Header.Get(key) == "" {
+				outbound.Header.Set(key, val)
+			}
+		}
+	}
 }
 
 func (s *requestService) executeStored(ctx context.Context, stored *domain.Request) (*ExecutionResult, error) {
@@ -426,10 +618,12 @@ func (s *requestService) executeStored(ctx context.Context, stored *domain.Reque
 	if err != nil {
 		return nil, err
 	}
+
+	// Query Parameters
 	if stored.QueryParams != "" {
-		var params map[string]string
-		if err := json.Unmarshal([]byte(stored.QueryParams), &params); err != nil {
-			return nil, errors.New("stored query_params must be a JSON object of string values")
+		params, err := parseKeyValueData(stored.QueryParams, "query_params")
+		if err != nil {
+			return nil, err
 		}
 		query := targetURL.Query()
 		for key, value := range params {
@@ -437,25 +631,49 @@ func (s *requestService) executeStored(ctx context.Context, stored *domain.Reque
 		}
 		targetURL.RawQuery = query.Encode()
 	}
+
 	outbound, err := http.NewRequestWithContext(ctx, stored.Method, targetURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
+
+	// Headers
 	if stored.Headers != "" {
-		var headers map[string]string
-		if err := json.Unmarshal([]byte(stored.Headers), &headers); err != nil {
-			return nil, errors.New("stored headers must be a JSON object of string values")
+		headers, err := parseKeyValueData(stored.Headers, "headers")
+		if err != nil {
+			return nil, err
 		}
 		for key, value := range headers {
 			outbound.Header.Set(key, value)
 		}
 	}
+
+	// Automatic Content-Type inference if not explicitly provided
+	if outbound.Header.Get("Content-Type") == "" && stored.Body != "" {
+		switch strings.ToLower(strings.TrimSpace(stored.BodyType)) {
+		case "json":
+			outbound.Header.Set("Content-Type", "application/json")
+		case "xml":
+			outbound.Header.Set("Content-Type", "application/xml")
+		case "form", "form-urlencoded", "urlencoded":
+			outbound.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		case "text":
+			outbound.Header.Set("Content-Type", "text/plain")
+		}
+	}
+
+	// Auth Configuration
+	applyAuth(outbound, targetURL, stored.Auth)
+	// Update request URL if Auth modified query params
+	outbound.URL = targetURL
+
 	started := time.Now()
 	res, err := s.httpClient.Do(outbound)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
+
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxExecutionResponseBytes+1))
 	if err != nil {
 		return nil, err
@@ -473,7 +691,12 @@ func (s *requestService) executeStored(ctx context.Context, stored *domain.Reque
 		bodyText += "\n\n[Response truncated at 2 MB]"
 	}
 	return &ExecutionResult{
-		Status: res.StatusCode, StatusText: res.Status, Time: time.Since(started).Milliseconds(),
-		Size: fmt.Sprintf("%dB", len(data)), Headers: headers, Body: bodyText, Truncated: truncated,
+		Status:     res.StatusCode,
+		StatusText: res.Status,
+		Time:       time.Since(started).Milliseconds(),
+		Size:       fmt.Sprintf("%dB", len(data)),
+		Headers:    headers,
+		Body:       bodyText,
+		Truncated:  truncated,
 	}, nil
 }

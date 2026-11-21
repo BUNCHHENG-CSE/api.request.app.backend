@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -20,11 +22,32 @@ type AppConfig struct {
 // LoadConfig retrieves configuration from the environment
 func LoadConfig() *AppConfig {
 	_ = godotenv.Load()
+
+	dbHost := getEnv("DB_HOST", "localhost")
+	dbUser := getEnv("DB_USER", "postgres")
+	dbPassword := getEnv("DB_PASSWORD", "secret")
+	dbName := getEnv("DB_NAME", "mydb")
+	dbPort := getEnv("DB_PORT", "5432")
+	dbSSLMode := getEnv("DB_SSLMODE", "disable")
+
+	defaultDSN := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
+		dbHost, dbUser, dbPassword, dbName, dbPort, dbSSLMode)
+
+	rawDatabaseURL := getEnv("DATABASE_URL", defaultDSN)
+	databaseURL := os.ExpandEnv(rawDatabaseURL)
+	// If the database URL still contains unresolved ${...} variables, fallback to assembled DSN
+	if strings.Contains(databaseURL, "${") {
+		databaseURL = defaultDSN
+	}
+
+	serverPort := getEnv("PORT", getEnv("SERVER_PORT", "8080"))
+	allowedOrigins := getEnv("CORS_ALLOWED_ORIGINS", getEnv("ALLOWED_ORIGINS", "http://localhost:3000"))
+
 	return &AppConfig{
-		DatabaseURL:          getEnv("DATABASE_URL", "host=localhost user=postgres password=secret dbname=mydb port=5432 sslmode=disable"),
-		ServerPort:           getEnv("SERVER_PORT", "8080"),
+		DatabaseURL:          databaseURL,
+		ServerPort:           serverPort,
 		JWTSecret:            getEnv("JWT_SECRET", "super-secret-key"),
-		AllowedOrigins:       getEnv("ALLOWED_ORIGINS", "http://localhost:3000"),
+		AllowedOrigins:       allowedOrigins,
 		AllowPrivateRequests: getBoolEnv("ALLOW_PRIVATE_REQUESTS", false),
 		LocalCollectionsRoot: getEnv("LOCAL_COLLECTIONS_ROOT", "./data/collections"),
 	}
@@ -43,8 +66,8 @@ func getBoolEnv(key string, fallback bool) bool {
 }
 
 func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+	if value, exists := os.LookupEnv(key); exists && strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
 	}
 	return fallback
 }

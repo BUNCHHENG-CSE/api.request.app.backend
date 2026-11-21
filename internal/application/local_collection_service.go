@@ -1,10 +1,13 @@
 package application
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,6 +25,13 @@ type LocalCollectionInfo struct {
 	Name        string    `json:"name"`
 	Path        string    `json:"path"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type LocalFileEntry struct {
+	Path     string    `json:"path"`
+	IsDir    bool      `json:"is_dir"`
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
 }
 
 type localSnapshot struct {
@@ -42,6 +52,11 @@ type LocalCollectionService interface {
 	Export(ctx context.Context, ownerID, workspaceID uuid.UUID) (*LocalCollectionInfo, error)
 	Import(ctx context.Context, ownerID, workspaceID uuid.UUID) (map[string]int, error)
 	Delete(ctx context.Context, ownerID, workspaceID uuid.UUID) error
+	ExportZip(ctx context.Context, ownerID, workspaceID uuid.UUID) ([]byte, string, error)
+	ImportZip(ctx context.Context, ownerID, workspaceID uuid.UUID, zipData []byte) (map[string]int, error)
+	GetFileTree(ctx context.Context, ownerID, workspaceID uuid.UUID) ([]LocalFileEntry, error)
+	ReadLocalFile(ctx context.Context, ownerID, workspaceID uuid.UUID, relativePath string) (string, error)
+	WriteLocalFile(ctx context.Context, ownerID, workspaceID uuid.UUID, relativePath, content string) error
 }
 
 type localCollectionService struct {
@@ -61,7 +76,14 @@ func NewLocalCollectionService(root string, workspaceRepo domain.WorkspaceReposi
 	if err := os.MkdirAll(abs, 0o750); err != nil {
 		return nil, err
 	}
-	return &localCollectionService{root: abs, workspaceRepo: workspaceRepo, flowRepo: flowRepo, requestRepo: requestRepo, environmentRepo: environmentRepo, collectionRepo: collectionRepo}, nil
+	return &localCollectionService{
+		root:            abs,
+		workspaceRepo:   workspaceRepo,
+		flowRepo:        flowRepo,
+		requestRepo:     requestRepo,
+		environmentRepo: environmentRepo,
+		collectionRepo:  collectionRepo,
+	}, nil
 }
 
 func (s *localCollectionService) workspaceDir(id uuid.UUID) string {
@@ -135,8 +157,10 @@ func slug(value string) string {
 }
 
 func parseStringMap(raw string) map[string]string {
-	values := map[string]string{}
-	_ = json.Unmarshal([]byte(raw), &values)
+	values, _ := parseKeyValueData(raw, "data")
+	if values == nil {
+		return map[string]string{}
+	}
 	return values
 }
 
@@ -162,7 +186,18 @@ func renderRequest(req domain.Request) string {
 	var b strings.Builder
 	name := strings.NewReplacer("\r", " ", "\n", " ").Replace(req.Name)
 	fmt.Fprintf(&b, "meta {\n  name: %s\n  type: http\n  seq: %d\n}\n\n", name, req.Position+1)
-	fmt.Fprintf(&b, "%s {\n  url: %s\n  body: %s\n  auth: none\n}\n", method, req.URL, bodyType)
+
+	authBlockType := "none"
+	var authParams map[string]any
+	if req.Auth != "" && req.Auth != "{}" {
+		if err := json.Unmarshal([]byte(req.Auth), &authParams); err == nil {
+			if t, ok := authParams["type"].(string); ok && t != "" {
+				authBlockType = strings.ToLower(t)
+			}
+		}
+	}
+
+	fmt.Fprintf(&b, "%s {\n  url: %s\n  body: %s\n  auth: %s\n}\n", method, req.URL, bodyType, authBlockType)
 	if headers := parseStringMap(req.Headers); len(headers) > 0 {
 		b.WriteString("\nheaders {\n")
 		for _, key := range sortedKeys(headers) {
@@ -177,8 +212,18 @@ func renderRequest(req domain.Request) string {
 		}
 		b.WriteString("}\n")
 	}
+	if authBlockType == "bearer" && authParams != nil {
+		if token, ok := authParams["token"].(string); ok && token != "" {
+			fmt.Fprintf(&b, "\nauth:bearer {\n  token: %s\n}\n", token)
+		}
+	} else if authBlockType == "basic" && authParams != nil {
+		fmt.Fprintf(&b, "\nauth:basic {\n  username: %v\n  password: %v\n}\n", authParams["username"], authParams["password"])
+	}
 	if req.Body != "" {
 		fmt.Fprintf(&b, "\nbody:%s {\n%s\n}\n", bodyType, req.Body)
+	}
+	if req.Scripts != "" && req.Scripts != "{}" && req.Scripts != "[]" {
+		fmt.Fprintf(&b, "\ntests {\n%s\n}\n", req.Scripts)
 	}
 	return b.String()
 }
@@ -218,7 +263,16 @@ func (s *localCollectionService) Export(ctx context.Context, ownerID, workspaceI
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
-	snapshot := localSnapshot{Version: 1, ExportedAt: time.Now().UTC(), Workspace: *workspace, Flows: flows, Environments: environments, Collections: collections, RequestFiles: map[string]string{}, EnvironmentFiles: map[string]string{}}
+	snapshot := localSnapshot{
+		Version:          1,
+		ExportedAt:       time.Now().UTC(),
+		Workspace:        *workspace,
+		Flows:            flows,
+		Environments:     environments,
+		Collections:      collections,
+		RequestFiles:     map[string]string{},
+		EnvironmentFiles: map[string]string{},
+	}
 	for _, flow := range flows {
 		requests, err := s.requestRepo.ListByFlow(ctx, flow.ID)
 		if err != nil {
@@ -249,6 +303,157 @@ func (s *localCollectionService) Export(ctx context.Context, ownerID, workspaceI
 		return nil, err
 	}
 	return &LocalCollectionInfo{WorkspaceID: workspaceID, Name: workspace.Name, Path: dir, UpdatedAt: snapshot.ExportedAt}, nil
+}
+
+func (s *localCollectionService) ExportZip(ctx context.Context, ownerID, workspaceID uuid.UUID) ([]byte, string, error) {
+	info, err := s.Export(ctx, ownerID, workspaceID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	err = filepath.Walk(info.Path, func(path string, fi os.FileInfo, err error) error {
+		if err != nil || fi.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(info.Path, path)
+		if err != nil {
+			return err
+		}
+		w, err := zw.Create(filepath.ToSlash(rel))
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(data)
+		return err
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, "", err
+	}
+
+	filename := fmt.Sprintf("%s-bruno-collection.zip", slug(info.Name))
+	return buf.Bytes(), filename, nil
+}
+
+func (s *localCollectionService) ImportZip(ctx context.Context, ownerID, workspaceID uuid.UUID, zipData []byte) (map[string]int, error) {
+	if _, err := s.workspaceRepo.GetByID(ctx, workspaceID, ownerID); err != nil {
+		return nil, err
+	}
+	dir, err := s.safeWorkspaceDir(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, err
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return nil, fmt.Errorf("invalid zip file: %w", err)
+	}
+
+	for _, file := range zr.File {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		cleanName := filepath.Clean(file.Name)
+		if strings.HasPrefix(cleanName, "..") || filepath.IsAbs(cleanName) {
+			return nil, errors.New("zip file contains invalid paths")
+		}
+		destPath, err := safeLocalFile(dir, cleanName)
+		if err != nil {
+			return nil, err
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return nil, err
+		}
+		content, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		if err := atomicWrite(destPath, content, 0o640); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.Import(ctx, ownerID, workspaceID)
+}
+
+func (s *localCollectionService) GetFileTree(ctx context.Context, ownerID, workspaceID uuid.UUID) ([]LocalFileEntry, error) {
+	if _, err := s.workspaceRepo.GetByID(ctx, workspaceID, ownerID); err != nil {
+		return nil, err
+	}
+	dir, err := s.safeWorkspaceDir(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []LocalFileEntry
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil || rel == "." {
+			return nil
+		}
+		entries = append(entries, LocalFileEntry{
+			Path:     filepath.ToSlash(rel),
+			IsDir:    info.IsDir(),
+			Size:     info.Size(),
+			Modified: info.ModTime().UTC(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (s *localCollectionService) ReadLocalFile(ctx context.Context, ownerID, workspaceID uuid.UUID, relativePath string) (string, error) {
+	if _, err := s.workspaceRepo.GetByID(ctx, workspaceID, ownerID); err != nil {
+		return "", err
+	}
+	dir, err := s.safeWorkspaceDir(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	filePath, err := safeLocalFile(dir, relativePath)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (s *localCollectionService) WriteLocalFile(ctx context.Context, ownerID, workspaceID uuid.UUID, relativePath, content string) error {
+	if _, err := s.workspaceRepo.GetByID(ctx, workspaceID, ownerID); err != nil {
+		return err
+	}
+	dir, err := s.safeWorkspaceDir(workspaceID)
+	if err != nil {
+		return err
+	}
+	filePath, err := safeLocalFile(dir, relativePath)
+	if err != nil {
+		return err
+	}
+	return atomicWrite(filePath, []byte(content), 0o640)
 }
 
 func (s *localCollectionService) readSnapshot(ownerID, workspaceID uuid.UUID) (*localSnapshot, string, error) {
@@ -358,10 +563,24 @@ func parseRequestFile(content string, req *domain.Request) {
 		encoded, _ := json.Marshal(values)
 		req.QueryParams = string(encoded)
 	}
+	if authBearer := findBlock(content, "auth:bearer"); authBearer != "" {
+		m := parseBlockMap(authBearer)
+		if token := m["token"]; token != "" {
+			encoded, _ := json.Marshal(map[string]string{"type": "bearer", "token": token})
+			req.Auth = string(encoded)
+		}
+	} else if authBasic := findBlock(content, "auth:basic"); authBasic != "" {
+		m := parseBlockMap(authBasic)
+		encoded, _ := json.Marshal(map[string]string{"type": "basic", "username": m["username"], "password": m["password"]})
+		req.Auth = string(encoded)
+	}
 	if req.BodyType != "" && req.BodyType != "none" {
 		if body := findBlock(content, "body:"+req.BodyType); body != "" {
 			req.Body = body
 		}
+	}
+	if tests := findBlock(content, "tests"); tests != "" {
+		req.Scripts = tests
 	}
 }
 

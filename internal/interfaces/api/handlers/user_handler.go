@@ -1,12 +1,10 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 
 	"api.request.app.backend/internal/application"
 	"api.request.app.backend/internal/interfaces/api/response"
-	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,33 +31,34 @@ func (h *UserHandler) RegisterUser(c *gin.Context) {
 
 	user, err := h.service.CreateUser(c.Request.Context(), req.Username, req.Email, req.Password)
 	if err != nil {
-		// In a production app, map domain errors to specific HTTP status codes (e.g., 409 Conflict for duplicate email)
-		response.Error(c, http.StatusInternalServerError, err.Error())
+		serviceError(c, err)
 		return
 	}
 
-	response.Success(c, http.StatusCreated, "User created successfully!!!", user)
+	response.Success(c, http.StatusCreated, "User created successfully", user)
 }
 
 func (h *UserHandler) GetUser(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, "Invalid user ID")
+	id, ok := pathUUID(c, "id", "user")
+	if !ok {
 		return
 	}
-	authenticatedID, ok := c.Get("user_id")
-	if !ok || authenticatedID.(uuid.UUID) != id {
+	authenticatedID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	if authenticatedID != id {
 		response.Error(c, http.StatusForbidden, "you can only access your own user record")
 		return
 	}
 
 	user, err := h.service.GetUserByID(c.Request.Context(), id)
 	if err != nil {
-		response.Error(c, http.StatusInternalServerError, "User not found")
+		serviceError(c, err)
 		return
 	}
 
-	response.Success(c, http.StatusOK, "Get user successfully!!!", user)
+	response.Success(c, http.StatusOK, "User retrieved successfully", user)
 }
 
 func (h *UserHandler) Login(c *gin.Context) {
@@ -74,7 +73,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 
 	token, user, err := h.service.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		response.Error(c, http.StatusUnauthorized, err.Error())
+		serviceError(c, err)
 		return
 	}
 	response.Success(c, http.StatusOK, "Login successful", gin.H{"token": token, "user": user})
@@ -140,12 +139,8 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 	err := h.service.ChangePassword(c.Request.Context(), userID, req.CurrentPassword, req.NewPassword, req.ConfirmPassword)
-	if errors.Is(err, application.ErrInvalidCurrentPassword) {
-		response.Error(c, http.StatusUnauthorized, err.Error())
-		return
-	}
 	if err != nil {
-		response.Error(c, http.StatusBadRequest, err.Error())
+		serviceError(c, err)
 		return
 	}
 	response.Success(c, http.StatusOK, "Password changed successfully", gin.H{})

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"api.request.app.backend/internal/domain"
@@ -23,6 +24,9 @@ type UserService interface {
 var (
 	ErrInvalidCurrentPassword = errors.New("current password is incorrect")
 	ErrPasswordConfirmation   = errors.New("new password and confirmation do not match")
+	ErrEmailAlreadyInUse      = errors.New("email already in use")
+	ErrUserNotFound           = errors.New("user not found")
+	ErrInvalidCredentials     = errors.New("invalid email or password")
 )
 
 type userService struct {
@@ -35,14 +39,20 @@ func NewUserService(repo domain.UserRepository, jwtSecret string) UserService {
 }
 
 func (s *userService) CreateUser(ctx context.Context, username, email, password string) (*domain.User, error) {
+	username = strings.TrimSpace(username)
+	email = strings.ToLower(strings.TrimSpace(email))
+
 	if username == "" || email == "" || password == "" {
 		return nil, errors.New("username, email, and password are required")
+	}
+	if len(password) < 6 {
+		return nil, errors.New("password must contain at least 6 characters")
 	}
 
 	// Check if user already exists
 	existingUser, _ := s.repo.GetByEmail(ctx, email)
 	if existingUser != nil {
-		return nil, errors.New("email already in use")
+		return nil, ErrEmailAlreadyInUse
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -64,13 +74,18 @@ func (s *userService) CreateUser(ctx context.Context, username, email, password 
 }
 
 func (s *userService) GetUserByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
-	return s.repo.GetByID(ctx, id)
+	user, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, ErrUserNotFound
+	}
+	return user, nil
 }
 
 func (s *userService) Login(ctx context.Context, email, password string) (string, *domain.User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	user, err := s.repo.GetByEmail(ctx, email)
 	if err != nil || user == nil || bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)) != nil {
-		return "", nil, errors.New("invalid email or password")
+		return "", nil, ErrInvalidCredentials
 	}
 
 	token, err := s.issueToken(user.ID)
@@ -81,6 +96,7 @@ func (s *userService) Login(ctx context.Context, email, password string) (string
 }
 
 func (s *userService) UpdateUser(ctx context.Context, id uuid.UUID, username string) (*domain.User, error) {
+	username = strings.TrimSpace(username)
 	if username == "" {
 		return nil, errors.New("username is required")
 	}

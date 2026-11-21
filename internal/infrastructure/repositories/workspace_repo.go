@@ -18,7 +18,6 @@ func NewWorkspaceRepository(db *gorm.DB) domain.WorkspaceRepository {
 }
 
 func (r *workspaceRepo) Create(ctx context.Context, workspace *domain.Workspace) error {
-	// GORM implementation
 	return r.db.WithContext(ctx).Create(workspace).Error
 }
 
@@ -33,7 +32,7 @@ func (r *workspaceRepo) GetByID(ctx context.Context, id, ownerID uuid.UUID) (*do
 
 func (r *workspaceRepo) List(ctx context.Context, ownerID uuid.UUID) ([]domain.Workspace, error) {
 	var workspaces []domain.Workspace
-	err := r.db.WithContext(ctx).Where("owner_id = ?", ownerID).Find(&workspaces).Error
+	err := r.db.WithContext(ctx).Where("owner_id = ?", ownerID).Order("created_at ASC").Find(&workspaces).Error
 	return workspaces, err
 }
 
@@ -60,6 +59,9 @@ func (r *workspaceRepo) Delete(ctx context.Context, id, ownerID uuid.UUID) error
 			return err
 		}
 		if err := tx.Where("workspace_id = ?", id).Delete(&domain.Collection{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("workspace_id = ?", id).Delete(&domain.RequestHistory{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("id = ? AND owner_id = ?", id, ownerID).Delete(&domain.Workspace{}).Error
