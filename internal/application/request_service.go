@@ -3,10 +3,15 @@ package application
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -20,7 +25,7 @@ import (
 
 const maxExecutionResponseBytes = 2 * 1024 * 1024
 
-var variableRegex = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_\-\.]+)\s*\}\}`)
+var variableRegex = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_\-\.\$]+)\s*\}\}`)
 
 type RequestInput struct {
 	FlowID       uuid.UUID
@@ -54,17 +59,28 @@ type RequestPatch struct {
 }
 
 type ExecutionResult struct {
-	HistoryID   uuid.UUID         `json:"history_id"`
-	Status      int               `json:"status"`
-	StatusText  string            `json:"statusText"`
-	Time        int64             `json:"time"`
-	Size        string            `json:"size"`
-	Headers     map[string]string `json:"headers"`
-	Body        string            `json:"body"`
-	Truncated   bool              `json:"truncated"`
-	Assertions  []AssertionResult `json:"assertions,omitempty"`
-	TestsPassed int               `json:"tests_passed"`
-	TestsFailed int               `json:"tests_failed"`
+	HistoryID          uuid.UUID         `json:"history_id"`
+	Status             int               `json:"status"`
+	StatusText         string            `json:"statusText"`
+	Time               int64             `json:"time"`
+	Size               string            `json:"size"`
+	Headers            map[string]string `json:"headers"`
+	Body               string            `json:"body"`
+	Truncated          bool              `json:"truncated"`
+	Assertions         []AssertionResult `json:"assertions,omitempty"`
+	TestsPassed        int               `json:"tests_passed"`
+	TestsFailed        int               `json:"tests_failed"`
+	ExtractedVariables map[string]string `json:"extracted_variables,omitempty"`
+}
+
+type HistoryDiff struct {
+	History1    domain.RequestHistory `json:"history_1"`
+	History2    domain.RequestHistory `json:"history_2"`
+	StatusMatch bool                  `json:"status_match"`
+	BodyMatch   bool                  `json:"body_match"`
+	TimeDiffMS  int64                 `json:"time_diff_ms"`
+	SizeDiff    int                   `json:"size_diff_bytes"`
+	HeaderDiff  map[string][2]string  `json:"header_diff"`
 }
 
 type RequestService interface {
@@ -77,9 +93,12 @@ type RequestService interface {
 	DuplicateRequest(ctx context.Context, ownerID, id uuid.UUID) (*domain.Request, error)
 	BulkDeleteRequests(ctx context.Context, ownerID uuid.UUID, ids []uuid.UUID) error
 	ExecuteRequest(ctx context.Context, ownerID, id uuid.UUID, environmentID *uuid.UUID) (*ExecutionResult, error)
+	ExecuteRequestWithVariables(ctx context.Context, ownerID, id uuid.UUID, environmentID *uuid.UUID, runtimeVars map[string]string) (*ExecutionResult, error)
 	ListHistory(ctx context.Context, ownerID uuid.UUID, workspaceID *uuid.UUID, page, limit int) ([]domain.RequestHistory, int64, error)
 	GetHistory(ctx context.Context, ownerID, id uuid.UUID) (*domain.RequestHistory, error)
+	CompareHistory(ctx context.Context, ownerID, id1, id2 uuid.UUID) (*HistoryDiff, error)
 	ClearHistory(ctx context.Context, ownerID uuid.UUID) error
+	SetCookieJar(cookieRepo domain.WorkspaceCookieRepository)
 }
 
 type requestService struct {
@@ -89,7 +108,12 @@ type requestService struct {
 	collectionRepo  domain.CollectionRepository
 	environmentRepo domain.EnvironmentRepository
 	historyRepo     domain.RequestHistoryRepository
+	cookieRepo      domain.WorkspaceCookieRepository
 	httpClient      *http.Client
+}
+
+func (s *requestService) SetCookieJar(cookieRepo domain.WorkspaceCookieRepository) {
+	s.cookieRepo = cookieRepo
 }
 
 func NewRequestService(repo domain.RequestRepository, flowRepo domain.FlowRepository, workspaceRepo domain.WorkspaceRepository, collectionRepo domain.CollectionRepository, environmentRepo domain.EnvironmentRepository, historyRepo domain.RequestHistoryRepository, allowPrivateRequests bool) RequestService {
@@ -391,15 +415,31 @@ func (s *requestService) ClearHistory(ctx context.Context, ownerID uuid.UUID) er
 }
 
 func substituteVariables(value string, variables map[string]string) string {
-	if len(variables) == 0 || value == "" {
+	if value == "" {
 		return value
 	}
 	return variableRegex.ReplaceAllStringFunc(value, func(match string) string {
 		submatches := variableRegex.FindStringSubmatch(match)
 		if len(submatches) > 1 {
 			varName := submatches[1]
-			if replacement, ok := variables[varName]; ok {
-				return replacement
+			if variables != nil {
+				if replacement, ok := variables[varName]; ok {
+					return replacement
+				}
+			}
+			switch varName {
+			case "$guid":
+				return uuid.New().String()
+			case "$timestamp":
+				return fmt.Sprintf("%d", time.Now().Unix())
+			case "$isoTimestamp":
+				return time.Now().UTC().Format(time.RFC3339)
+			case "$randomInt":
+				return fmt.Sprintf("%d", rand.Intn(1000)+1)
+			case "$randomEmail":
+				return fmt.Sprintf("user_%d@example.com", rand.Intn(100000)+1)
+			case "$randomName":
+				return fmt.Sprintf("User_%d", rand.Intn(10000)+1)
 			}
 		}
 		return match
@@ -483,6 +523,10 @@ func (s *requestService) executionVariables(ctx context.Context, ownerID uuid.UU
 }
 
 func (s *requestService) ExecuteRequest(ctx context.Context, ownerID, id uuid.UUID, environmentID *uuid.UUID) (*ExecutionResult, error) {
+	return s.ExecuteRequestWithVariables(ctx, ownerID, id, environmentID, nil)
+}
+
+func (s *requestService) ExecuteRequestWithVariables(ctx context.Context, ownerID, id uuid.UUID, environmentID *uuid.UUID, runtimeVars map[string]string) (*ExecutionResult, error) {
 	stored, err := s.GetRequest(ctx, ownerID, id)
 	if err != nil {
 		return nil, err
@@ -495,6 +539,11 @@ func (s *requestService) ExecuteRequest(ctx context.Context, ownerID, id uuid.UU
 	if err != nil {
 		return nil, err
 	}
+	if runtimeVars != nil {
+		for k, v := range runtimeVars {
+			variables[k] = v
+		}
+	}
 	executable := *stored
 	executable.URL = substituteVariables(executable.URL, variables)
 	executable.Headers = substituteVariables(executable.Headers, variables)
@@ -502,7 +551,7 @@ func (s *requestService) ExecuteRequest(ctx context.Context, ownerID, id uuid.UU
 	executable.Body = substituteVariables(executable.Body, variables)
 	executable.Auth = substituteVariables(executable.Auth, variables)
 
-	result, executionErr := s.executeStored(ctx, &executable)
+	result, executionErr := s.executeStored(ctx, &executable, flow.WorkspaceID)
 	history := &domain.RequestHistory{
 		UserID:      ownerID,
 		WorkspaceID: flow.WorkspaceID,
@@ -542,7 +591,56 @@ func (s *requestService) ExecuteRequest(ctx context.Context, ownerID, id uuid.UU
 		}
 	}
 
+	// Extract variables from response for chaining
+	extracted := ExtractVariables(stored.Scripts, stored.Settings, result.Body, result.Headers)
+	if len(extracted) > 0 {
+		result.ExtractedVariables = extracted
+	}
+
 	return result, nil
+}
+
+func (s *requestService) CompareHistory(ctx context.Context, ownerID, id1, id2 uuid.UUID) (*HistoryDiff, error) {
+	h1, err := s.historyRepo.GetByID(ctx, id1, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	h2, err := s.historyRepo.GetByID(ctx, id2, ownerID)
+	if err != nil {
+		return nil, err
+	}
+
+	h1Headers := map[string]string{}
+	h2Headers := map[string]string{}
+	if h1.ResponseHeaders != "" {
+		_ = json.Unmarshal([]byte(h1.ResponseHeaders), &h1Headers)
+	}
+	if h2.ResponseHeaders != "" {
+		_ = json.Unmarshal([]byte(h2.ResponseHeaders), &h2Headers)
+	}
+
+	headerDiff := make(map[string][2]string)
+	for k, v1 := range h1Headers {
+		v2, ok := h2Headers[k]
+		if !ok || v1 != v2 {
+			headerDiff[k] = [2]string{v1, v2}
+		}
+	}
+	for k, v2 := range h2Headers {
+		if _, ok := h1Headers[k]; !ok {
+			headerDiff[k] = [2]string{"", v2}
+		}
+	}
+
+	return &HistoryDiff{
+		History1:    *h1,
+		History2:    *h2,
+		StatusMatch: h1.Status == h2.Status,
+		BodyMatch:   h1.ResponseBody == h2.ResponseBody,
+		TimeDiffMS:  h2.DurationMS - h1.DurationMS,
+		SizeDiff:    h2.SizeBytes - h1.SizeBytes,
+		HeaderDiff:  headerDiff,
+	}, nil
 }
 
 func applyAuth(outbound *http.Request, targetURL *url.URL, authRaw string) {
@@ -604,7 +702,47 @@ func applyAuth(outbound *http.Request, targetURL *url.URL, authRaw string) {
 	}
 }
 
-func (s *requestService) executeStored(ctx context.Context, stored *domain.Request) (*ExecutionResult, error) {
+func applyPreRequestDirectives(outbound *http.Request, scripts string, body []byte) {
+	if scripts == "" {
+		return
+	}
+	// @hmac_sha256 HeaderName Secret
+	hmacRegex := regexp.MustCompile(`(?i)@hmac_sha256\s+([a-zA-Z0-9_\-]+)\s+([^\r\n]+)`)
+	for _, m := range hmacRegex.FindAllStringSubmatch(scripts, -1) {
+		if len(m) >= 3 {
+			headerName := m[1]
+			secret := strings.TrimSpace(m[2])
+			mac := hmac.New(sha256.New, []byte(secret))
+			mac.Write(body)
+			sig := hex.EncodeToString(mac.Sum(nil))
+			outbound.Header.Set(headerName, sig)
+		}
+	}
+	// @timestamp_header HeaderName
+	tsRegex := regexp.MustCompile(`(?i)@timestamp_header\s+([a-zA-Z0-9_\-]+)`)
+	for _, m := range tsRegex.FindAllStringSubmatch(scripts, -1) {
+		if len(m) >= 2 {
+			outbound.Header.Set(m[1], fmt.Sprintf("%d", time.Now().Unix()))
+		}
+	}
+	// @uuid_header HeaderName
+	uuidRegex := regexp.MustCompile(`(?i)@uuid_header\s+([a-zA-Z0-9_\-]+)`)
+	for _, m := range uuidRegex.FindAllStringSubmatch(scripts, -1) {
+		if len(m) >= 2 {
+			outbound.Header.Set(m[1], uuid.New().String())
+		}
+	}
+	// @base64_header HeaderName Value
+	b64Regex := regexp.MustCompile(`(?i)@base64_header\s+([a-zA-Z0-9_\-]+)\s+([^\r\n]+)`)
+	for _, m := range b64Regex.FindAllStringSubmatch(scripts, -1) {
+		if len(m) >= 3 {
+			encoded := base64.StdEncoding.EncodeToString([]byte(strings.TrimSpace(m[2])))
+			outbound.Header.Set(m[1], encoded)
+		}
+	}
+}
+
+func (s *requestService) executeStored(ctx context.Context, stored *domain.Request, workspaceID uuid.UUID) (*ExecutionResult, error) {
 	method, err := validateRequest(stored.Method, stored.URL)
 	if err != nil {
 		return nil, err
@@ -667,12 +805,54 @@ func (s *requestService) executeStored(ctx context.Context, stored *domain.Reque
 	// Update request URL if Auth modified query params
 	outbound.URL = targetURL
 
+	// Pre-request dynamic crypto and timestamp directives
+	applyPreRequestDirectives(outbound, stored.Scripts, []byte(stored.Body))
+
+	// Attach matching cookies from Workspace Cookie Jar
+	if s.cookieRepo != nil && workspaceID != uuid.Nil {
+		if cookies, cErr := s.cookieRepo.GetMatching(ctx, workspaceID, targetURL.Hostname(), targetURL.Path); cErr == nil {
+			for _, c := range cookies {
+				if c.ExpiresAt == nil || c.ExpiresAt.After(time.Now()) {
+					outbound.AddCookie(&http.Cookie{Name: c.Name, Value: c.Value})
+				}
+			}
+		}
+	}
+
 	started := time.Now()
 	res, err := s.httpClient.Do(outbound)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
+
+	// Persist response Set-Cookie headers into Workspace Cookie Jar
+	if s.cookieRepo != nil && workspaceID != uuid.Nil {
+		for _, c := range res.Cookies() {
+			var exp *time.Time
+			if !c.Expires.IsZero() {
+				exp = &c.Expires
+			}
+			dom := c.Domain
+			if dom == "" {
+				dom = targetURL.Hostname()
+			}
+			cPath := c.Path
+			if cPath == "" {
+				cPath = "/"
+			}
+			_ = s.cookieRepo.Save(ctx, &domain.WorkspaceCookie{
+				WorkspaceID: workspaceID,
+				Domain:      dom,
+				Path:        cPath,
+				Name:        c.Name,
+				Value:       c.Value,
+				ExpiresAt:   exp,
+				Secure:      c.Secure,
+				HttpOnly:    c.HttpOnly,
+			})
+		}
+	}
 
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxExecutionResponseBytes+1))
 	if err != nil {

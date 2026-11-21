@@ -35,6 +35,13 @@ func (r *userRepoStub) GetByEmail(_ context.Context, email string) (*domain.User
 	return r.user, nil
 }
 
+func (r *userRepoStub) GetByUsernameOrEmail(_ context.Context, identifier string) (*domain.User, error) {
+	if r.user == nil || (r.user.Email != identifier && r.user.Username != identifier) {
+		return nil, errors.New("user not found")
+	}
+	return r.user, nil
+}
+
 func (r *userRepoStub) Update(_ context.Context, user *domain.User) error {
 	r.user = user
 	return nil

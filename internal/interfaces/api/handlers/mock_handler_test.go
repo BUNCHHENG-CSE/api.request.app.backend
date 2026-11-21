@@ -31,6 +31,9 @@ func (m *mockFlowRepo) Create(context.Context, *domain.Flow) error { return nil 
 func (m *mockFlowRepo) GetByID(context.Context, uuid.UUID) (*domain.Flow, error) {
 	return &m.flow, nil
 }
+func (m *mockFlowRepo) GetByWebhookToken(context.Context, string) (*domain.Flow, error) {
+	return &m.flow, nil
+}
 func (m *mockFlowRepo) ListByWorkspace(context.Context, uuid.UUID) ([]domain.Flow, error) {
 	return []domain.Flow{m.flow}, nil
 }

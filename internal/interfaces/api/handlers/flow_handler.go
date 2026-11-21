@@ -58,9 +58,10 @@ func (h *FlowHandler) Run(c *gin.Context) {
 	failed := 0
 	totalTestsPassed := 0
 	totalTestsFailed := 0
+	accumulatedVars := make(map[string]string)
 
 	for _, stored := range requests {
-		result, runErr := h.requestService.ExecuteRequest(c.Request.Context(), ownerID, stored.ID, req.EnvironmentID)
+		result, runErr := h.requestService.ExecuteRequestWithVariables(c.Request.Context(), ownerID, stored.ID, req.EnvironmentID, accumulatedVars)
 		if runErr != nil {
 			failed++
 			results = append(results, gin.H{
@@ -76,22 +77,27 @@ func (h *FlowHandler) Run(c *gin.Context) {
 		passed++
 		totalTestsPassed += result.TestsPassed
 		totalTestsFailed += result.TestsFailed
+		for k, v := range result.ExtractedVariables {
+			accumulatedVars[k] = v
+		}
 		results = append(results, gin.H{
-			"request_id": stored.ID,
-			"name":       stored.Name,
-			"result":     result,
+			"request_id":          stored.ID,
+			"name":                stored.Name,
+			"result":              result,
+			"extracted_variables": result.ExtractedVariables,
 		})
 	}
 
 	response.Success(c, http.StatusOK, "Flow run completed", gin.H{
-		"flow_id":            id,
-		"results":            results,
-		"total_requests":     len(requests),
-		"passed":             passed,
-		"failed":             failed,
-		"total_tests_passed": totalTestsPassed,
-		"total_tests_failed": totalTestsFailed,
-		"duration_ms":        time.Since(started).Milliseconds(),
+		"flow_id":             id,
+		"results":             results,
+		"total_requests":      len(requests),
+		"passed":              passed,
+		"failed":              failed,
+		"total_tests_passed":  totalTestsPassed,
+		"total_tests_failed":  totalTestsFailed,
+		"duration_ms":         time.Since(started).Milliseconds(),
+		"extracted_variables": accumulatedVars,
 	})
 }
 
@@ -188,4 +194,24 @@ func (h *FlowHandler) Delete(c *gin.Context) {
 		return
 	}
 	response.Success(c, http.StatusOK, "Flow deleted successfully", gin.H{})
+}
+
+func (h *FlowHandler) GenerateWebhookToken(c *gin.Context) {
+	id, ok := pathUUID(c, "id", "flow")
+	if !ok {
+		return
+	}
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	token, err := h.service.GenerateWebhookToken(c.Request.Context(), ownerID, id)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "Webhook token generated successfully", gin.H{
+		"token": token,
+		"url":   "/api/v1/webhooks/flows/" + token,
+	})
 }

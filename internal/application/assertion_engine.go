@@ -78,7 +78,13 @@ func evaluateAssertions(rulesRaw string, res *ExecutionResult) []AssertionResult
 			result.Passed, result.Message = compareString(res.Body, rule.Expected, operator, "Body")
 
 		case "json", "json_field":
-			val, exists := extractJSONPath(parsedJSONBody, rule.Property)
+			var val any
+			var exists bool
+			if parsedJSONBody != nil {
+				val, exists = extractJSONPath(parsedJSONBody, rule.Property)
+			} else if parsedArrayBody != nil {
+				val, exists = extractJSONPath(parsedArrayBody, rule.Property)
+			}
 			if !exists && parsedArrayBody != nil && rule.Property == "length" {
 				val = len(parsedArrayBody)
 				exists = true
@@ -188,23 +194,36 @@ func toInt64(val any) (int64, error) {
 	}
 }
 
-func extractJSONPath(data map[string]any, path string) (any, bool) {
+func extractJSONPath(data any, path string) (any, bool) {
 	if data == nil || path == "" {
 		return nil, false
 	}
+	path = strings.ReplaceAll(path, "[", ".")
+	path = strings.ReplaceAll(path, "]", "")
 	parts := strings.Split(path, ".")
 	var current any = data
 
 	for _, part := range parts {
-		m, ok := current.(map[string]any)
-		if !ok {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		switch c := current.(type) {
+		case map[string]any:
+			val, exists := c[part]
+			if !exists {
+				return nil, false
+			}
+			current = val
+		case []any:
+			idx, err := strconv.Atoi(part)
+			if err != nil || idx < 0 || idx >= len(c) {
+				return nil, false
+			}
+			current = c[idx]
+		default:
 			return nil, false
 		}
-		val, exists := m[part]
-		if !exists {
-			return nil, false
-		}
-		current = val
 	}
 	return current, true
 }

@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 
 	"api.request.app.backend/internal/domain"
@@ -14,6 +16,8 @@ type FlowService interface {
 	GetFlowsByWorkspace(ctx context.Context, ownerID, workspaceID uuid.UUID) ([]domain.Flow, error)
 	UpdateFlow(ctx context.Context, ownerID, id uuid.UUID, name, description, nodes, edges *string) (*domain.Flow, error)
 	DeleteFlow(ctx context.Context, ownerID, id uuid.UUID) error
+	GenerateWebhookToken(ctx context.Context, ownerID, id uuid.UUID) (string, error)
+	GetFlowByWebhookToken(ctx context.Context, token string) (*domain.Flow, error)
 }
 
 type flowService struct {
@@ -97,4 +101,28 @@ func (s *flowService) DeleteFlow(ctx context.Context, ownerID, id uuid.UUID) err
 		return err
 	}
 	return s.repo.Delete(ctx, id)
+}
+
+func (s *flowService) GenerateWebhookToken(ctx context.Context, ownerID, id uuid.UUID) (string, error) {
+	flow, err := s.authorizeFlow(ctx, ownerID, id)
+	if err != nil {
+		return "", err
+	}
+	bytes := make([]byte, 24)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(bytes)
+	flow.WebhookToken = token
+	if err := s.repo.Update(ctx, flow); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *flowService) GetFlowByWebhookToken(ctx context.Context, token string) (*domain.Flow, error) {
+	if token == "" {
+		return nil, errors.New("webhook token is required")
+	}
+	return s.repo.GetByWebhookToken(ctx, token)
 }

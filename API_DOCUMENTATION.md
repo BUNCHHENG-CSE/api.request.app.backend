@@ -47,11 +47,13 @@ JWTs expire 24 hours after issuance. `POST /users/refresh` returns a new token. 
 
 All paths below except `/health` are relative to `/api/v1`.
 
-### System
+### System & Public Gateways
 
 | Method | Path | Purpose | Auth |
 |---|---|---|---|
 | `GET` | `/health` | Liveness check | No |
+| `ANY` | `/mock/:workspaceId/*path` | Simulated Mock Server matching workspace stored requests | No |
+| `POST` | `/webhooks/flows/:token` | Public CI/CD automated flow execution webhook | Token |
 | `GET` | `/search?q=users&workspace_id=:id&limit=20` | Search owned flows, requests, collections, and environments | Yes |
 
 ### Authentication and users
@@ -70,14 +72,25 @@ All paths below except `/health` are relative to `/api/v1`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/workspaces` | List workspaces owned by the user |
+| `GET` | `/workspaces` | List workspaces owned by or shared with the user |
 | `POST` | `/workspaces` | Create a workspace |
-| `GET` | `/workspaces/:id` | Get an owned workspace |
-| `PATCH` | `/workspaces/:id` | Rename an owned workspace |
-| `DELETE` | `/workspaces/:id` | Delete workspace and its child resources |
+| `GET` | `/workspaces/:id` | Get an accessible workspace |
+| `PATCH` | `/workspaces/:id` | Rename a workspace (admin only) |
+| `DELETE` | `/workspaces/:id` | Delete workspace and its child resources (owner only) |
 | `GET` | `/workspaces/:id/flows` | List workspace flows |
 | `GET` | `/workspaces/:id/environments` | List workspace environments |
 | `GET` | `/workspaces/:id/collections` | List workspace collections |
+| `GET` | `/workspaces/:id/members` | List members and their roles |
+| `POST` | `/workspaces/:id/members` | Add a user to the workspace with role (`admin`, `editor`, `viewer`) |
+| `PATCH` | `/workspaces/:id/members/:userId` | Update member role (`admin`, `editor`, `viewer`) |
+| `DELETE` | `/workspaces/:id/members/:userId` | Remove member or leave workspace |
+| `GET` | `/workspaces/:id/export-openapi` | Export entire workspace as OpenAPI 3.0.3 specification |
+| `GET` | `/workspaces/:id/cookies` | List cookies stored in the workspace Cookie Jar |
+| `POST` | `/workspaces/:id/cookies` | Add/set a cookie in the workspace Cookie Jar |
+| `DELETE` | `/workspaces/:id/cookies/:cookieId` | Delete an individual cookie |
+| `DELETE` | `/workspaces/:id/cookies` | Clear all cookies in the workspace Cookie Jar |
+| `GET` | `/workspaces/:id/activity?limit=30` | View workspace audit log and activity feed |
+| `GET` | `/workspaces/:id/docs?format=html\|markdown` | Generate complete interactive API documentation for the workspace |
 
 ### Flows
 
@@ -88,7 +101,10 @@ All paths below except `/health` are relative to `/api/v1`.
 | `PATCH` | `/flows/:id` | Update flow metadata or graph data |
 | `DELETE` | `/flows/:id` | Delete a flow and its requests |
 | `GET` | `/flows/:id/requests` | List stored requests in a flow |
-| `POST` | `/flows/:id/run` | Execute all requests in a flow sequentially |
+| `POST` | `/flows/:id/run` | Execute all requests in a flow sequentially with variable chaining |
+| `POST` | `/flows/:id/benchmark` | Run load testing & performance benchmark with concurrency and iterations |
+| `POST` | `/flows/:id/webhook-token` | Generate a permanent secret trigger token for CI/CD test automation |
+| `POST` | `/webhooks/flows/:token` | *(Public)* Trigger flow execution from CI/CD (GitHub Actions, etc.) without JWT |
 
 ### Stored requests
 
@@ -101,6 +117,8 @@ All paths below except `/health` are relative to `/api/v1`.
 | `POST` | `/requests/:id/execute` | Execute a stored request from the backend |
 | `POST` | `/requests/:id/duplicate` | Duplicate a stored request |
 | `POST` | `/requests/bulk-delete` | Delete up to 100 requests |
+| `POST` | `/requests/import-curl` | Parse a raw cURL command into a new request |
+| `GET` | `/requests/:id/snippet?language=curl` | Generate executable code snippet (`curl`, `javascript`, `python`, `golang`) |
 
 ### Environments
 
@@ -121,22 +139,50 @@ All paths below except `/health` are relative to `/api/v1`.
 | `DELETE` | `/collections/:id` | Delete a collection |
 | `POST` | `/collections/:id/requests/:requestId` | Associate a request with a collection |
 | `DELETE` | `/collections/:id/requests/:requestId` | Remove a request from a collection |
+| `POST` | `/collections/import-postman` | Import Postman v2.1 collection |
+| `POST` | `/collections/import-openapi` | Import OpenAPI 3.0 / Swagger 2.0 (YAML/JSON) |
+| `GET` | `/collections/:id/export-openapi` | Export collection as OpenAPI 3.0.3 specification |
+| `GET` | `/collections/:id/docs?format=html\|markdown` | Generate documentation for a specific collection |
 
 ### Local Bruno-style storage
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/workspaces/:id/local/export` | Export/synchronize a database workspace to local Bruno files |
+| `POST` | `/workspaces/:id/local/export` | Export/synchronize database workspace to local Bruno `.bru` files |
 | `GET` | `/local-collections` | List local collections owned by the authenticated user |
 | `GET` | `/local-collections/:workspaceId` | Get a local collection's path and sync metadata |
 | `POST` | `/local-collections/:workspaceId/import` | Import local `.bru` edits into PostgreSQL |
 | `DELETE` | `/local-collections/:workspaceId` | Delete only the local filesystem copy |
+| `GET` | `/local-collections/:workspaceId/export-zip` | Download complete Bruno collection as a .zip archive |
+| `POST` | `/local-collections/:workspaceId/import-zip` | Upload and unpack a Bruno collection .zip archive |
+| `GET` | `/local-collections/:workspaceId/files` | Get hierarchical file tree of local `.bru` and JSON files |
+| `GET` | `/local-collections/:workspaceId/file?path=:p` | Read contents of an individual `.bru` or JSON file |
+| `PUT` | `/local-collections/:workspaceId/file` | Write/update an individual `.bru` or JSON file |
 
-### Execution history
+### GraphQL
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/graphql/introspect` | Fetch full GraphQL schema (types, queries, mutations) for autocomplete |
+
+### Scheduled Collection Monitors
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/monitors` | Create a collection/flow monitor |
+| `GET` | `/monitors?workspace_id=:id` | List monitors in a workspace |
+| `GET` | `/monitors/:id` | Get monitor configuration |
+| `PATCH` | `/monitors/:id` | Update monitor schedule, webhook URL, or active state |
+| `DELETE` | `/monitors/:id` | Delete monitor |
+| `POST` | `/monitors/:id/run` | Execute monitor immediately and dispatch alert webhook if configured |
+| `GET` | `/monitors/:id/logs?limit=20` | List historical execution logs for the monitor |
+
+### Execution history & Diffs
 
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/history?page=1&limit=20&workspace_id=:id` | List execution history; workspace filter is optional |
+| `GET` | `/history/diff?id1=:id1&id2=:id2` | Compare two execution history entries (status, duration, headers, body diff) |
 | `GET` | `/history/:id` | Get a complete history entry |
 | `DELETE` | `/history` | Clear the authenticated user's history |
 
@@ -592,6 +638,222 @@ Requests support declarative test assertions configured in `scripts` or `setting
 
 When executing a request or running a flow, the engine evaluates each assertion against the response and returns `assertions`, `tests_passed`, and `tests_failed` in the result payload.
 
+### Dynamic Variables
+
+Requests dynamically evaluate variables enclosed in `{{...}}` across URL, Headers, Query Parameters, and Body. Built-in dynamic generators include:
+
+- `{{$guid}}`: Generates a random UUID v4 (e.g. `c7b2a611-0985-48fa-bb6d-97992cb585da`).
+- `{{$timestamp}}`: Current Unix epoch in seconds (e.g. `1763711900`).
+- `{{$isoTimestamp}}`: Current UTC timestamp in ISO-8601 format (e.g. `2026-11-21T07:58:20Z`).
+- `{{$randomInt}}`: Random integer between 1 and 1000.
+- `{{$randomEmail}}`: Random valid email address (e.g. `user_49201@example.com`).
+- `{{$randomName}}`: Random identifier name (e.g. `User_7142`).
+
+Environment variables and runtime variables override dynamic variable names if collisions occur.
+
+### Flow Request Chaining & Variable Extraction
+
+Requests inside a flow can extract data from previous responses (e.g., auth tokens, user IDs) and feed them to subsequent steps:
+
+1. **Script Syntax (Bruno / Postman / Direct)**:
+   - Bruno: `bru.setVar("token", res.body.data.token)`
+   - Postman: `pm.environment.set("token", pm.response.json().data.token)`
+   - Direct: `@extract token = body.data.token` or `@extract authHeader = header.Authorization`
+
+2. **Structured JSON Configuration** (in `scripts` or `settings`):
+   ```json
+   {
+     "extract": [
+       {"name": "token", "source": "body", "path": "data.token"},
+       {"name": "userId", "source": "body", "path": "data.user.id"},
+       {"name": "firstItem", "source": "body", "path": "items[0].id"},
+       {"name": "authToken", "source": "header", "path": "Authorization"}
+     ]
+   }
+   ```
+
+When executing `POST /flows/:id/run`, all extracted variables accumulate across steps and are returned in the final flow execution payload under `extracted_variables`.
+
+### Response History Diff Comparison
+
+```http
+GET /api/v1/history/diff?id1=:id1&id2=:id2
+Authorization: Bearer <token>
+```
+
+Compares two execution history entries and returns:
+- `status_match`: Boolean indicating whether HTTP status codes match.
+- `body_match`: Boolean indicating whether response bodies are identical.
+- `time_diff_ms`: Difference in response duration in milliseconds.
+- `size_diff_bytes`: Difference in response payload size in bytes.
+- `header_diff`: Map of header differences between history 1 and 2 (`header: [val1, val2]`).
+
+### Workspace Member Collaboration & RBAC
+
+Workspaces support multi-user collaboration with Role-Based Access Control (`admin`, `editor`, `viewer`):
+
+```http
+POST /api/v1/workspaces/:id/members
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "identifier": "bob@example.com",
+  "role": "editor"
+}
+```
+
+- `GET /api/v1/workspaces/:id/members`: List all members and roles.
+- `PATCH /api/v1/workspaces/:id/members/:userId`: Change member role (`{"role": "admin"}`).
+- `DELETE /api/v1/workspaces/:id/members/:userId`: Remove member (admins can remove members; members can remove themselves to leave).
+
+### OpenAPI 3.0 Import & Export
+
+- **Import**: `POST /api/v1/collections/import-openapi`
+  Accepts multipart file upload (`file` form field + `workspace_id`) or JSON payload (`{"workspace_id": "...", "spec": "yaml-or-json-content"}`). Automatically generates a Collection and companion Flow with all routes, query parameters, headers, and request bodies.
+- **Export Workspace**: `GET /api/v1/workspaces/:id/export-openapi`
+  Exports all requests in the workspace as an OpenAPI 3.0.3 JSON specification.
+- **Export Collection**: `GET /api/v1/collections/:id/export-openapi`
+  Exports all requests in a specific collection as an OpenAPI 3.0.3 specification.
+
+### Scheduled Collection Monitors & Alert Webhooks
+
+Automated background monitors run collections/flows at specified intervals and trigger HTTP webhook alerts on failure:
+
+```http
+POST /api/v1/monitors
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "workspace_id": "workspace-uuid",
+  "flow_id": "flow-uuid",
+  "name": "Production API Monitor",
+  "interval_minutes": 15,
+  "webhook_url": "https://alert.example.com/webhook",
+  "is_active": true
+}
+```
+
+- `GET /api/v1/monitors?workspace_id=:id`: List workspace monitors.
+- `GET /api/v1/monitors/:id`: Get monitor details.
+- `PATCH /api/v1/monitors/:id`: Update schedule, webhook URL, or status.
+- `DELETE /api/v1/monitors/:id`: Remove monitor and execution history.
+- `POST /api/v1/monitors/:id/run`: Trigger immediate monitor execution and webhook dispatch.
+- `GET /api/v1/monitors/:id/logs?limit=20`: List historical run logs.
+
+### Workspace Cookie Jar Management
+
+Workspaces feature an automated Cookie Jar that functions identically to Postman and Bruno:
+
+- **Automatic Cookie Attachment**: When executing any request in the workspace, cookies matching the target domain and path are automatically attached to the outbound `Cookie` header.
+- **Automatic Set-Cookie Persistence**: When an outbound response contains `Set-Cookie` headers, they are parsed and persisted to the workspace's Cookie Jar.
+- **API Endpoints**:
+  - `GET /api/v1/workspaces/:id/cookies`: Inspect all domain cookies.
+  - `POST /api/v1/workspaces/:id/cookies`: Manually store a cookie (`{"domain": "example.com", "name": "token", "value": "123"}`).
+  - `DELETE /api/v1/workspaces/:id/cookies/:cookieId`: Remove a specific cookie.
+  - `DELETE /api/v1/workspaces/:id/cookies`: Clear the entire cookie jar.
+
+### Flow Performance & Load Testing (Benchmark Runner)
+
+Run concurrency and load testing benchmarks on any Flow directly from the backend without third-party tools:
+
+```http
+POST /api/v1/flows/:id/benchmark
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "iterations": 20,
+  "concurrency": 5,
+  "delay_ms": 10
+}
+```
+
+Response includes latency percentiles and throughput:
+```json
+{
+  "total_runs": 20,
+  "passed_runs": 20,
+  "failed_runs": 0,
+  "total_requests": 60,
+  "duration_ms": 1420,
+  "rps": 42.25,
+  "min_latency_ms": 45,
+  "max_latency_ms": 190,
+  "avg_latency_ms": 68.4,
+  "p50_latency_ms": 60,
+  "p90_latency_ms": 115,
+  "p95_latency_ms": 155
+}
+```
+
+### CI/CD Webhook Trigger for Flows
+
+Execute API flows directly from GitHub Actions, GitLab CI, Jenkins, or deployment webhooks:
+
+1. Generate trigger token:
+   ```http
+   POST /api/v1/flows/:id/webhook-token
+   Authorization: Bearer <token>
+   ```
+2. Trigger execution externally without needing a JWT:
+   ```http
+   POST /api/v1/webhooks/flows/<token>
+   ```
+   Returns 200 OK with test results on pass, or 417 Expectation Failed if any assertions or requests fail.
+
+### Pre-Request Dynamic Crypto & Signature Directives
+
+Requests support pre-request scripts or annotations defined in the `scripts` field to automatically generate headers, signatures, and timestamps prior to transmission:
+
+- `@hmac_sha256 <HeaderName> <Secret>`: Calculates HMAC-SHA256 signature of request body and sets the header.
+- `@timestamp_header <HeaderName>`: Injects current Unix epoch seconds.
+- `@uuid_header <HeaderName>`: Injects a unique nonce UUID.
+- `@base64_header <HeaderName> <Value>`: Base64 encodes the value and sets the header.
+
+Example `scripts` content:
+```
+@hmac_sha256 X-Signature my_api_secret_key
+@timestamp_header X-Timestamp
+@uuid_header X-Nonce
+```
+
+### GraphQL Introspection
+
+```http
+POST /api/v1/graphql/introspect
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "url": "https://countries.trevorblades.com/",
+  "headers": {
+    "Authorization": "Bearer optional"
+  }
+}
+```
+
+Dispatches standard GraphQL introspection query and returns parsed schema types, query fields, mutations, and argument schemas.
+
+### API Documentation Generator
+
+Generate interactive HTML documentation or GitHub-flavored Markdown for any collection or workspace:
+
+- `GET /api/v1/collections/:id/docs?format=html` (or `format=markdown`)
+- `GET /api/v1/workspaces/:id/docs?format=html` (or `format=markdown`)
+
+Returns styled documentation with method color badges, parameters table, request body schemas, and headers.
+
+### Workspace Activity Feed & Audit Log
+
+```http
+GET /api/v1/workspaces/:id/activity?limit=30
+Authorization: Bearer <token>
+```
+
+Returns chronological timeline of team activities and actions in the workspace.
+
 ### Delete the local copy
 
 `DELETE /local-collections/:workspaceId` removes only the directory beneath `LOCAL_COLLECTIONS_ROOT`. It does not delete the PostgreSQL workspace or its resources.
@@ -651,15 +913,10 @@ The server also applies request IDs, security headers, HTTP timeouts, database c
 
 ## Still not implemented
 
-The following items from `API_GAPS.md` need additional schemas or product decisions and are not available yet:
+The following optional extensions are not currently part of the core API:
 
-- OAuth providers, account linking, and server-side JWT revocation.
-- Workspace members, invitations, roles, presence, and activity.
-- Nested folders and manual ordering.
-- Encrypted environment secrets and multi-scope variable precedence.
-- Persisted flow-run summaries, script/test execution, monitors, schedules, and performance testing.
-- Pagination/filter/sort metadata on resource list endpoints beyond history search limits.
-- OpenAPI, Postman, and cURL import/export or code generation beyond the implemented Bruno-style local format.
-- Organization-specific outbound allowlists and audit policy beyond the built-in private-network SSRF guard.
+- OAuth2 third-party SSO providers and server-side JWT revocation lists.
+- Real-time presence/websockets for collaborative simultaneous typing.
+- Organization-specific egress proxy policies beyond the built-in private-network SSRF guard.
 
 Do not integrate against unlisted routes.

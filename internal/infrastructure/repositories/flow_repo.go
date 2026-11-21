@@ -27,6 +27,12 @@ func (r *flowRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Flow, err
 	return &flow, err
 }
 
+func (r *flowRepo) GetByWebhookToken(ctx context.Context, token string) (*domain.Flow, error) {
+	var flow domain.Flow
+	err := r.db.WithContext(ctx).Where("webhook_token = ?", token).First(&flow).Error
+	return &flow, err
+}
+
 func (r *flowRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Flow, error) {
 	var flows []domain.Flow
 	err := r.db.WithContext(ctx).Where("workspace_id = ?", workspaceID).Order("created_at ASC").Find(&flows).Error

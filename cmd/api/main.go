@@ -35,11 +35,16 @@ func main() {
 	err = db.AutoMigrate(
 		&domain.User{},
 		&domain.Workspace{},
+		&domain.WorkspaceMember{},
 		&domain.Flow{},
 		&domain.Request{},
 		&domain.Environment{},
 		&domain.Collection{},
 		&domain.RequestHistory{},
+		&domain.Monitor{},
+		&domain.MonitorRunLog{},
+		&domain.WorkspaceCookie{},
+		&domain.WorkspaceActivity{},
 	)
 	if err != nil {
 		log.Fatal("Failed to migrate database schemas:", err)
@@ -47,18 +52,24 @@ func main() {
 
 	userRepo := repositories.NewUserRepository(db)
 	workspaceRepo := repositories.NewWorkspaceRepository(db)
+	workspaceMemberRepo := repositories.NewWorkspaceMemberRepository(db)
 	flowRepo := repositories.NewFlowRepository(db)
 	requestRepo := repositories.NewRequestRepository(db)
 	envRepo := repositories.NewEnvironmentRepository(db)
 	collectionRepo := repositories.NewCollectionRepository(db)
 	historyRepo := repositories.NewRequestHistoryRepository(db)
 	searchRepo := repositories.NewSearchRepository(db)
+	monitorRepo := repositories.NewMonitorRepository(db)
+	cookieRepo := repositories.NewCookieRepository(db)
+	activityRepo := repositories.NewActivityRepository(db)
 
 	// 3. Initialize Services (Application Layer)
 	userService := application.NewUserService(userRepo, cfg.JWTSecret)
 	workspaceService := application.NewWorkspaceService(workspaceRepo)
+	workspaceMemberService := application.NewWorkspaceMemberService(workspaceRepo, workspaceMemberRepo, userRepo)
 	flowService := application.NewFlowService(flowRepo, workspaceRepo)
 	requestService := application.NewRequestService(requestRepo, flowRepo, workspaceRepo, collectionRepo, envRepo, historyRepo, cfg.AllowPrivateRequests)
+	requestService.SetCookieJar(cookieRepo)
 	envService := application.NewEnvironmentService(envRepo, workspaceRepo)
 	collectionService := application.NewCollectionService(collectionRepo, workspaceRepo)
 	searchService := application.NewSearchService(searchRepo)
@@ -68,10 +79,18 @@ func main() {
 	}
 	importerService := application.NewImporterService(requestService, flowService, workspaceRepo, flowRepo, requestRepo, collectionRepo)
 	snippetService := application.NewSnippetService(requestService)
+	openAPIService := application.NewOpenAPIService(workspaceRepo, collectionRepo, flowRepo, requestRepo)
+	monitorService := application.NewMonitorService(monitorRepo, workspaceRepo, flowRepo, requestService)
+	cookieService := application.NewCookieService(cookieRepo, workspaceRepo)
+	benchmarkService := application.NewBenchmarkService(flowRepo, workspaceRepo, requestService)
+	graphQLService := application.NewGraphQLService()
+	docsService := application.NewDocsService(workspaceRepo, collectionRepo, flowRepo, requestRepo)
+	activityService := application.NewActivityService(activityRepo, workspaceRepo)
 
 	// 4. Initialize Handlers (Interfaces Layer)
 	userHandler := handlers.NewUserHandler(userService)
 	workspaceHandler := handlers.NewWorkspaceHandler(workspaceService)
+	workspaceMemberHandler := handlers.NewWorkspaceMemberHandler(workspaceMemberService)
 	flowHandler := handlers.NewFlowHandler(flowService, requestService)
 	requestHandler := handlers.NewRequestHandler(requestService)
 	envHandler := handlers.NewEnvironmentHandler(envService)
@@ -81,6 +100,14 @@ func main() {
 	importerHandler := handlers.NewImporterHandler(importerService)
 	snippetHandler := handlers.NewSnippetHandler(snippetService)
 	mockHandler := handlers.NewMockHandler(workspaceRepo, flowRepo, requestRepo)
+	openAPIHandler := handlers.NewOpenAPIHandler(openAPIService)
+	monitorHandler := handlers.NewMonitorHandler(monitorService)
+	cookieHandler := handlers.NewCookieHandler(cookieService)
+	benchmarkHandler := handlers.NewBenchmarkHandler(benchmarkService)
+	graphQLHandler := handlers.NewGraphQLHandler(graphQLService)
+	docsHandler := handlers.NewDocsHandler(docsService)
+	activityHandler := handlers.NewActivityHandler(activityService)
+	webhookHandler := handlers.NewWebhookHandler(flowService, requestService)
 
 	// 5. Setup Router and Inject Handlers
 	router := routes.SetupRouter(
@@ -95,6 +122,15 @@ func main() {
 		importerHandler,
 		snippetHandler,
 		mockHandler,
+		workspaceMemberHandler,
+		openAPIHandler,
+		monitorHandler,
+		cookieHandler,
+		benchmarkHandler,
+		graphQLHandler,
+		docsHandler,
+		activityHandler,
+		webhookHandler,
 		cfg.JWTSecret,
 		cfg.AllowedOrigins,
 	)

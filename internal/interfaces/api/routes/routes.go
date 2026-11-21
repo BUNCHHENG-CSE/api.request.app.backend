@@ -20,6 +20,15 @@ func SetupRouter(
 	importerHandler *handlers.ImporterHandler,
 	snippetHandler *handlers.SnippetHandler,
 	mockHandler *handlers.MockHandler,
+	workspaceMemberHandler *handlers.WorkspaceMemberHandler,
+	openAPIHandler *handlers.OpenAPIHandler,
+	monitorHandler *handlers.MonitorHandler,
+	cookieHandler *handlers.CookieHandler,
+	benchmarkHandler *handlers.BenchmarkHandler,
+	graphQLHandler *handlers.GraphQLHandler,
+	docsHandler *handlers.DocsHandler,
+	activityHandler *handlers.ActivityHandler,
+	webhookHandler *handlers.WebhookHandler,
 	jwtSecret string,
 	allowedOrigins string,
 ) *gin.Engine {
@@ -37,6 +46,9 @@ func SetupRouter(
 
 	v1 := router.Group("/api/v1")
 	{
+		// Public CI/CD Webhook Trigger Route
+		v1.POST("/webhooks/flows/:token", webhookHandler.TriggerFlow)
+
 		users := v1.Group("/users")
 		{
 			users.POST("/register", userHandler.RegisterUser)
@@ -47,6 +59,7 @@ func SetupRouter(
 		protected.Use(middleware.AuthMiddleware(jwtSecret))
 		{
 			protected.GET("/search", searchHandler.Search)
+			protected.POST("/graphql/introspect", graphQLHandler.Introspect)
 			protected.GET("/users/:id", userHandler.GetUser)
 			protected.PATCH("/users/:id", userHandler.Update)
 			protected.POST("/users/refresh", userHandler.Refresh)
@@ -64,6 +77,17 @@ func SetupRouter(
 				workspaces.GET("/:id/environments", envHandler.ListByWorkspace)
 				workspaces.GET("/:id/collections", collectionHandler.ListByWorkspace)
 				workspaces.POST("/:id/local/export", localCollectionHandler.Export)
+				workspaces.GET("/:id/export-openapi", openAPIHandler.ExportWorkspace)
+				workspaces.GET("/:id/members", workspaceMemberHandler.ListMembers)
+				workspaces.POST("/:id/members", workspaceMemberHandler.AddMember)
+				workspaces.PATCH("/:id/members/:userId", workspaceMemberHandler.UpdateRole)
+				workspaces.DELETE("/:id/members/:userId", workspaceMemberHandler.RemoveMember)
+				workspaces.GET("/:id/cookies", cookieHandler.ListCookies)
+				workspaces.POST("/:id/cookies", cookieHandler.AddCookie)
+				workspaces.DELETE("/:id/cookies/:cookieId", cookieHandler.DeleteCookie)
+				workspaces.DELETE("/:id/cookies", cookieHandler.ClearCookies)
+				workspaces.GET("/:id/activity", activityHandler.List)
+				workspaces.GET("/:id/docs", docsHandler.GenerateWorkspaceDocs)
 			}
 
 			flows := protected.Group("/flows")
@@ -74,6 +98,8 @@ func SetupRouter(
 				flows.DELETE("/:id", flowHandler.Delete)
 				flows.GET("/:id/requests", requestHandler.ListByFlow)
 				flows.POST("/:id/run", flowHandler.Run)
+				flows.POST("/:id/benchmark", benchmarkHandler.RunBenchmark)
+				flows.POST("/:id/webhook-token", flowHandler.GenerateWebhookToken)
 			}
 
 			requests := protected.Group("/requests")
@@ -92,6 +118,7 @@ func SetupRouter(
 			history := protected.Group("/history")
 			{
 				history.GET("", requestHandler.ListHistory)
+				history.GET("/diff", requestHandler.CompareHistory)
 				history.GET("/:id", requestHandler.GetHistory)
 				history.DELETE("", requestHandler.ClearHistory)
 			}
@@ -113,6 +140,9 @@ func SetupRouter(
 				collections.POST("/:id/requests/:requestId", collectionHandler.AddRequest)
 				collections.DELETE("/:id/requests/:requestId", collectionHandler.RemoveRequest)
 				collections.POST("/import-postman", importerHandler.ImportPostman)
+				collections.POST("/import-openapi", openAPIHandler.ImportOpenAPI)
+				collections.GET("/:id/export-openapi", openAPIHandler.ExportCollection)
+				collections.GET("/:id/docs", docsHandler.GenerateCollectionDocs)
 			}
 
 			localCollections := protected.Group("/local-collections")
@@ -126,6 +156,17 @@ func SetupRouter(
 				localCollections.GET("/:workspaceId/files", localCollectionHandler.GetFiles)
 				localCollections.GET("/:workspaceId/file", localCollectionHandler.ReadFile)
 				localCollections.PUT("/:workspaceId/file", localCollectionHandler.WriteFile)
+			}
+
+			monitors := protected.Group("/monitors")
+			{
+				monitors.POST("", monitorHandler.Create)
+				monitors.GET("", monitorHandler.List)
+				monitors.GET("/:id", monitorHandler.Get)
+				monitors.PATCH("/:id", monitorHandler.Update)
+				monitors.DELETE("/:id", monitorHandler.Delete)
+				monitors.POST("/:id/run", monitorHandler.Run)
+				monitors.GET("/:id/logs", monitorHandler.ListLogs)
 			}
 		}
 	}

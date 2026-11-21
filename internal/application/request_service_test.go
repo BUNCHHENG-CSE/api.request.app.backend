@@ -68,6 +68,12 @@ func (r *flowRepoMemory) GetByID(_ context.Context, id uuid.UUID) (*domain.Flow,
 	}
 	return r.flow, nil
 }
+func (r *flowRepoMemory) GetByWebhookToken(_ context.Context, token string) (*domain.Flow, error) {
+	if r.flow == nil || r.flow.WebhookToken != token {
+		return nil, errors.New("flow not found")
+	}
+	return r.flow, nil
+}
 func (r *flowRepoMemory) ListByWorkspace(context.Context, uuid.UUID) ([]domain.Flow, error) {
 	if r.flow == nil {
 		return []domain.Flow{}, nil

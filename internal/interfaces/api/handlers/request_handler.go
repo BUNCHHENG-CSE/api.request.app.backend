@@ -257,3 +257,32 @@ func (h *RequestHandler) ClearHistory(c *gin.Context) {
 	}
 	response.Success(c, http.StatusOK, "History cleared successfully", gin.H{})
 }
+
+func (h *RequestHandler) CompareHistory(c *gin.Context) {
+	id1Str := c.Query("id1")
+	id2Str := c.Query("id2")
+	if id1Str == "" || id2Str == "" {
+		response.Error(c, http.StatusBadRequest, "Both id1 and id2 query parameters are required")
+		return
+	}
+	id1, err := uuid.Parse(id1Str)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid id1 UUID")
+		return
+	}
+	id2, err := uuid.Parse(id2Str)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "Invalid id2 UUID")
+		return
+	}
+	ownerID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	diff, err := h.service.CompareHistory(c.Request.Context(), ownerID, id1, id2)
+	if err != nil {
+		serviceError(c, err)
+		return
+	}
+	response.Success(c, http.StatusOK, "History comparison retrieved successfully", diff)
+}
